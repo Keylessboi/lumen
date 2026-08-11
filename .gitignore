@@ -1,0 +1,39 @@
+# --- Rust ---
+/target/
+**/*.rs.bk
+
+# --- Android / Kotlin / Gradle ---
+*.apk
+*.aab
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# --- Flutter / Dart ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.flutter-plugins
+
+# --- Go ---
+bin/
+
+# --- IDE ---
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+
+# --- secrets / local config ---
+.env
+.env.*
+*.pem
+*.key
