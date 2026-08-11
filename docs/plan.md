@@ -42,6 +42,16 @@ These are the *only* files Agent B consumes from Agent A (and vice-versa). They 
 - **Merge windows:** Agent A merges to main at M1, M2, M4, M6, M7. Agent B merges at M1, M3, M5, M6, M7. Both branches exist simultaneously; they only touch their own zones, so no merge conflicts are possible *unless a freeze point was violated* — which the CI contract test catches.
 - **CI gate (non-negotiable):** every PR must pass `./gradlew :core:test :transport-xmpp:test` plus its own module's build. A PR that touches a file outside its owner's zone **fails CI by convention** (enforced by a `tools/ownership-check.sh` script wired into CI).
 
+### Async coordination via GitHub Discussions
+
+The two agents are separate processes and never share a terminal. All async coordination happens through **GitHub Discussions** on this repo (`https://github.com/Keylessboi/lumen/discussions`). Treat Discussions as the shared bulletin board; the issue tracker is for code defects only.
+
+- **Cross-agent questions** (contract ambiguity, interface drift, dependency ordering) go to a Discussion, tagged `agent-a` or `agent-b`, NOT a DM the other agent will never see. Use the pinned thread `agent-coordination` for anything time-sensitive.
+- **Freeze-point changes** (anything touching `core/src/commonMain`, the SQLite schema, or the E2EE envelope) require a Discussion announcing the change + a 24h review window before the tag-bump PR. Both agents watch the `freeze-review` label.
+- **Milestone handoffs:** the agent exiting a milestone opens a Discussion titled `handoff: M<N> -> M<N+1>` with the tag hash, what was verified, and what the other agent must confirm before starting. The receiving agent replies with their go/no-go.
+- **Naming convention:** `[A]` / `[B]` prefix on the subject line so the other agent can filter. One topic per thread. Close threads when resolved.
+- **GitHub issue tracker** is reserved for: build failures, CI breaks, security findings, and acceptance-criteria failures. Open an issue with the milestone tag and gate ID (e.g., `M4 / G3`).
+
 ### Addressable milestones
 
 Every milestone is a **git tag** (`M0`..`M8`) on main, with a one-commit-audit trail. "Addressable code" = you can check out the tag and verify the gate independently.
