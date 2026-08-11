@@ -4,6 +4,64 @@
 
 ---
 
+## Two-Agent Execution Contract
+
+Lumen is built by **two agents in parallel**. This contract prevents interference: every file has exactly one owner, every cross-agent dependency flows through a frozen interface, and every milestone is a git-tagged, independently verifiable unit.
+
+### Ownership zones (one owner per path, no exceptions)
+
+| Path | Owner | Notes |
+|---|---|---|
+| `core/src/commonMain/**` | **Agent A** | Data model, rollup, clock, category, sync, crypto. **FROZEN at M1 — after the freeze, Agent B codes against it without editing it.** |
+| `core/src/commonTest/**` | **Agent A** | Shared contract tests. |
+| `core/src/desktopMain/**` | **Agent A** | libsecret/OS keyring impl. |
+| `core/src/androidMain/**` | **Agent B** | Android Keystore impl ONLY. Smallest possible surface. |
+| `transport-xmpp/**` | **Agent A** | XMPP client, IBR, MAM, embedded provider list. |
+| `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts. |
+| `app-android/**` | **Agent B** | CMP Android app, UsageStats collector, hardening. |
+| `tools/registry-builder/**` | **Agent A** | Category registry dataset tooling. |
+| `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier. |
+| `docs/design-spec.md` | **Agent A** | Week-1 design spec owner. Agent B may *read* and file issues, never edit. |
+| `docs/data-model.md` | **Agent A** | Frozen data model doc. |
+| `docs/e2ee.md` | **Agent B** | E2EE design + threat model doc. |
+| `docs/providers.md` | **Agent B** | Provider vetting policy + list. |
+| `docs/non-goals.md` | shared | Both may append, never delete. |
+
+### Interface freeze points (the only things that cross zones)
+
+These are the *only* files Agent B consumes from Agent A (and vice-versa). They freeze at specific gates and never change without a milestone review:
+
+1. **`core/src/commonMain` public API** — `SyncTransport`, `E2EE` seam, data model types, `rollup` engine signature. **Frozen at M1.** Agent B writes androidMain against this API. Changes after freeze require a tag-bump PR reviewed by both agents.
+2. **`E2EE.kt` envelope format** — frozen at M4 (G3). The ciphertext envelope is a wire contract; `docs/e2ee.md` is its normative spec.
+3. **SQLite schema** — frozen at M1. Both agents' UI reads it; schema migrations are additive-only and owned by Agent A.
+
+### Git protocol (how they share one repo)
+
+- `main` branch is **always green** — both agents merge only via passing PRs.
+- **Agent A works in `feat/core-linux` branches; Agent B in `feat/android` branches.** Branches are per-milestone, named `feat/<milestone>/<slug>` (e.g., `feat/m2/linux-collector`).
+- **Merge windows:** Agent A merges to main at M1, M2, M4, M6, M7. Agent B merges at M1, M3, M5, M6, M7. Both branches exist simultaneously; they only touch their own zones, so no merge conflicts are possible *unless a freeze point was violated* — which the CI contract test catches.
+- **CI gate (non-negotiable):** every PR must pass `./gradlew :core:test :transport-xmpp:test` plus its own module's build. A PR that touches a file outside its owner's zone **fails CI by convention** (enforced by a `tools/ownership-check.sh` script wired into CI).
+
+### Addressable milestones
+
+Every milestone is a **git tag** (`M0`..`M8`) on main, with a one-commit-audit trail. "Addressable code" = you can check out the tag and verify the gate independently.
+
+| Tag | Gate | Addressable evidence | Owner |
+|---|---|---|---|
+| `M0` | Phase 0 exit | `docs/design-spec.md`, `docs/data-model.md`, green `:core:build` | A |
+| `M1` | Contract freeze | frozen `core` public API + schema; `ownership-check.sh` green | A (+B review) |
+| `M2` | G1 (Linux slice) | `app-linux` collector + UI on real Hyprland | A |
+| `M3` | G2 (Android slice) | `app-android` UsageStats + UI on device | B |
+| `M4` | G3 (sync+E2EE) | `transport-xmpp` + `core` sync, ciphertext-only verified | A (sync) + B (test server) |
+| `M5` | G4 (export/migrate) | Argon2id export/import round-trip | B |
+| `M6` | G5 (categories) | registry + override behavior | A |
+| `M7` | G6 (nudge+polish) | break reminder, design pass, RC | shared |
+| `M8` | v1.0 release | full acceptance checklist | shared |
+
+**Interference rule:** an agent may not start a milestone whose *entry* gate is the other agent's exit gate without confirming that tag exists on main. Work only ever forks from a tagged main.
+
+---
+
 ## Adjudicated Decisions
 
 | Fight | Decision | One-line rationale |
