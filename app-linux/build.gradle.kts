@@ -49,6 +49,10 @@ compose.desktop {
             }
             packageName = "lumen"
             packageVersion = "0.1.0"
+            // JvmLumenStore uses JDBC (java.sql.DriverManager) for SQLite.
+            // The jlink runtime image omits it by default, so the app crashes
+            // at startup with NoClassDefFoundError.
+            modules("java.sql")
         }
     }
 }
