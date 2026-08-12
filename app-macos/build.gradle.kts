@@ -31,6 +31,8 @@ kotlin {
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(libs.kotlinx.coroutines.core)
+                // TimeZone for the display-day boundary (LocalDay, discussion #29).
+                implementation(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.serialization.json)
                 // Read-only JDBC access to the macOS Knowledge store for the
                 // opt-in history import. App data does not go through this.

@@ -26,6 +26,7 @@ import dev.lumen.ui.charts.DayTotal
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.formatDuration
+import dev.lumen.ui.liveMsWithinDay
 import kotlinx.coroutines.delay
 
 /**
@@ -48,19 +49,20 @@ fun main() = application {
     var liveApp by remember { mutableStateOf<String?>(null) }
     var liveSinceMs by remember { mutableStateOf(0L) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var currentDay by remember { mutableStateOf(store.today()) }
     var windowVisible by remember { mutableStateOf(!launchedAtLogin()) }
     var launchAtLogin by remember { mutableStateOf(LoginItem.isEnabled()) }
 
     // Collection is tied to the application, NOT to the window. The window is
     // a view onto it; hiding the window must not stop tracking.
     LaunchedEffect(Unit) {
-        totals = store.totalsFor(UtcDay.today())
+        totals = store.totalsFor(store.today())
         recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
         collector.focusChanges().collect { change ->
             store.rememberName(change.appKey, change.displayName)
             tracker.onChange(change)?.let { closed ->
                 store.append(closed)
-                totals = store.totalsFor(UtcDay.today())
+                totals = store.totalsFor(store.today())
             }
             liveApp = change.displayName ?: change.appKey.value
             liveSinceMs = change.atMs
@@ -68,16 +70,41 @@ fun main() = application {
     }
 
     LaunchedEffect(Unit) {
+        var lastChartRefreshMs = System.currentTimeMillis()
         while (true) {
             now = System.currentTimeMillis()
-            // Rolls the view over at UTC midnight without a restart.
-            val today = UtcDay.today()
-            if (totals.isNotEmpty() || liveSinceMs > 0) totals = store.totalsFor(today)
+            val today = store.today()
+
+            if (today != currentDay) {
+                // Midnight, local. Yesterday is complete: it becomes a bar in
+                // the trend chart, and the day starts again at zero. The open
+                // session is NOT closed — the user is still at the keyboard —
+                // but the part of it that belongs to yesterday stops counting
+                // toward today; see liveMs below.
+                currentDay = today
+                totals = store.totalsFor(today)
+                recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
+                lastChartRefreshMs = now
+            } else {
+                if (totals.isNotEmpty() || liveSinceMs > 0) totals = store.totalsFor(today)
+                // Today's own bar should grow during the day, but re-deriving
+                // a week of totals every second would read every event file
+                // every second. A minute is finer than the chart can show.
+                if (now - lastChartRefreshMs >= CHART_REFRESH_MS) {
+                    recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
+                    lastChartRefreshMs = now
+                }
+            }
             delay(1000)
         }
     }
 
-    val liveMs = if (liveSinceMs > 0) (now - liveSinceMs).coerceAtLeast(0) else 0
+    // Live time is clamped to the current day. A session open across midnight
+    // has already had its pre-midnight portion counted into yesterday, so
+    // counting the whole session into today would double it AND make the new
+    // day open at however long the user had been sitting there.
+    val dayStartMs = remember(currentDay) { store.startOfDayMs(currentDay) }
+    val liveMs = liveMsWithinDay(nowMs = now, sessionStartedAtMs = liveSinceMs, dayStartMs = dayStartMs)
     val totalMs = totals.sumOf { it.totalMs } + liveMs
 
     var history by remember {
@@ -170,7 +197,7 @@ fun main() = application {
                     history = when (val r = result) {
                         is KnowledgeCImporter.Result.Imported -> {
                             store.appendImported(r.events)
-                            val today = UtcDay.today()
+                            val today = store.today()
                             totals = store.totalsFor(today)
                             // The whole point of an import is the days behind
                             // today, so refresh the trend view too.
@@ -182,9 +209,9 @@ fun main() = application {
                                 // days the Today screen does not show, and
                                 // "Imported 319 sessions" next to an unchanged
                                 // number reads as a lie.
-                                val days = r.events.map { UtcDay.dayOf(it.startedAtMs) }.distinct()
+                                val days = r.events.map { store.dayOf(it.startedAtMs) }.distinct()
                                 val onToday = r.events
-                                    .filter { UtcDay.dayOf(it.startedAtMs) == today }
+                                    .filter { store.dayOf(it.startedAtMs) == today }
                                     .sumOf { it.durationMs }
                                 val earlier = r.events.sumOf { it.durationMs } - onToday
                                 HistoryState.Message(
@@ -234,6 +261,12 @@ private fun launchedAtLogin(): Boolean =
 /** How far back a first import reaches. The store rarely holds more than this. */
 /** Chart 3 in docs/design-spec.md is "7/30-day bars"; 7 is the calm default. */
 private const val HISTORY_WINDOW_DAYS = 7
+
+/**
+ * How often the trend chart re-derives. A second would re-read every event
+ * file every second; a minute is already finer than a bar can show.
+ */
+private const val CHART_REFRESH_MS = 60_000L
 
 private const val DEFAULT_IMPORT_WINDOW_MS = 30L * 24 * 3_600_000
 
