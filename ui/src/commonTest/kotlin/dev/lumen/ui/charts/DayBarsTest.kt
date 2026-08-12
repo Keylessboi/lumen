@@ -52,9 +52,55 @@ class DayBarsTest {
 
     @Test
     fun `today is flagged so a partial day is not read as a decline`() {
-        val today = DayTotal("2026-08-12", "12", 600_000, isToday = true)
-        val yesterday = DayTotal("2026-08-11", "11", 7_200_000)
-        assertTrue(today.isToday)
-        assertTrue(!yesterday.isToday)
+        assertTrue(DayTotal("2026-08-12", 600_000, isToday = true).isToday)
+        assertTrue(!DayTotal("2026-08-11", 7_200_000).isToday)
+    }
+
+    // ---- axis labels ----
+    //
+    // LO could not tell what "06 07 08" meant, and he was right not to: a
+    // bare day-of-month reads as an hour, a week number, or a count. These
+    // pin the labels as unambiguously calendar.
+
+    @Test
+    fun `axis labels are weekdays, not bare numbers`() {
+        // 2026-08-12 is a Wednesday.
+        assertEquals("Wed", DayTotal("2026-08-12", 0).axisLabel())
+        assertEquals("Thu", DayTotal("2026-08-13", 0).axisLabel())
+        assertEquals("Sun", DayTotal("2026-08-16", 0).axisLabel())
+    }
+
+    @Test
+    fun `the day in progress is named rather than colour-coded`() {
+        // docs/design-spec.md: state must never be carried by colour alone.
+        assertEquals("Today", DayTotal("2026-08-12", 0, isToday = true).axisLabel())
+    }
+
+    @Test
+    fun `the range anchors the weekday axis to real dates`() {
+        val week = listOf(
+            DayTotal("2026-08-06", 0),
+            DayTotal("2026-08-12", 0, isToday = true),
+        )
+        // Weekdays alone say which days, never which week.
+        assertEquals("Aug 6 – 12", dateRangeLabel(week))
+    }
+
+    @Test
+    fun `a range spanning two months names both`() {
+        assertEquals(
+            "Jul 28 – Aug 3",
+            dateRangeLabel(listOf(DayTotal("2026-07-28", 0), DayTotal("2026-08-03", 0))),
+        )
+    }
+
+    @Test
+    fun `a single-day range is just that day`() {
+        assertEquals("Aug 6", dateRangeLabel(listOf(DayTotal("2026-08-06", 0))))
+    }
+
+    @Test
+    fun `an empty range is empty rather than a stray dash`() {
+        assertEquals("", dateRangeLabel(emptyList()))
     }
 }

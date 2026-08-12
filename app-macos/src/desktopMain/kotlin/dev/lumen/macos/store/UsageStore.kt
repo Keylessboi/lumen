@@ -168,12 +168,7 @@ class UsageStore(
             val dayStart = todayStart - back * MILLIS_PER_DAY
             val dayUtc = UtcDay.dayOf(dayStart)
             val total = totalsFor(dayUtc).sumOf { it.totalMs }
-            DayTotal(
-                dayUtc = dayUtc,
-                label = dayUtc.takeLast(2),
-                totalMs = total,
-                isToday = dayUtc == today,
-            )
+            DayTotal(dayUtc = dayUtc, totalMs = total, isToday = dayUtc == today)
         }
     }
 

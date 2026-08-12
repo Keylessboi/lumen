@@ -27,18 +27,61 @@ import dev.lumen.ui.formatDuration
 /**
  * One day's total, for the trend view.
  *
- * [dayUtc] is a `YYYY-MM-DD` UTC day — the same key the rollup table uses,
- * so a day here is the same day everywhere (`docs/data-model.md`).
- * [label] is the short human form ("Mon", "12"); the caller formats it,
- * because the UI module has no business owning locale rules.
+ * [dayUtc] is a `YYYY-MM-DD` UTC day — the same key the rollup table uses, so
+ * a day here is the same day everywhere (`docs/data-model.md`).
+ *
+ * Axis labels are derived from [dayUtc] by the chart rather than passed in.
+ * An earlier version let each caller format them and macOS produced bare
+ * day-of-month numbers — "06 07 08" reads as an hour, a week number, or
+ * nothing at all. Deriving them here means all three platforms label the axis
+ * identically, which is the point of a shared UI module.
  */
 data class DayTotal(
     val dayUtc: String,
-    val label: String,
     val totalMs: Long,
     /** True for the day currently in progress — it is a partial number. */
     val isToday: Boolean = false,
 )
+
+/**
+ * Axis label for a day: `Wed`, or `Today` for the day in progress.
+ *
+ * A weekday cannot be mistaken for a duration or a count, which a bare number
+ * can. "Today" is spelled out rather than marked with a dot or a colour
+ * because the spec requires state to be readable without relying on colour.
+ */
+fun DayTotal.axisLabel(): String =
+    if (isToday) "Today" else weekdayShort(dayUtc)
+
+internal fun weekdayShort(dayUtc: String): String =
+    kotlinx.datetime.LocalDate.parse(dayUtc).dayOfWeek.name
+        .lowercase()
+        .replaceFirstChar { it.uppercase() }
+        .take(3)
+
+internal fun monthDay(dayUtc: String): String {
+    val date = kotlinx.datetime.LocalDate.parse(dayUtc)
+    val month = date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)
+    return "$month ${date.dayOfMonth}"
+}
+
+/**
+ * The window's span, e.g. `Aug 6 – Aug 12`, or `Aug 6 – 12` when both ends
+ * share a month. Stated once above the chart so the weekday axis is anchored
+ * to actual dates rather than floating.
+ */
+fun dateRangeLabel(days: List<DayTotal>): String {
+    if (days.isEmpty()) return ""
+    val first = days.first().dayUtc
+    val last = days.last().dayUtc
+    if (first == last) return monthDay(first)
+    val sameMonth = first.substring(0, 7) == last.substring(0, 7)
+    return if (sameMonth) {
+        "${monthDay(first)} – ${kotlinx.datetime.LocalDate.parse(last).dayOfMonth}"
+    } else {
+        "${monthDay(first)} – ${monthDay(last)}"
+    }
+}
 
 /**
  * Chart type 3 of the three v1 charts (`docs/design-spec.md`): per-day
@@ -116,7 +159,7 @@ fun DayBars(
         ) {
             days.forEach { day ->
                 Text(
-                    day.label,
+                    day.axisLabel(),
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
                     style = TextStyle(
@@ -158,10 +201,10 @@ fun DayBarsSection(
                 ),
             )
             Spacer(Modifier.weight(1f))
-            // State the scale. A bar chart without one invites the reader to
-            // compare heights across screens where the peak differs.
+            // Anchor the weekday axis to real dates. Without this the labels
+            // say which days of the week, never which week.
             Text(
-                "tallest ${formatDuration(peak)}",
+                dateRangeLabel(days),
                 style = TextStyle(
                     color = LumenTheme.TextSecondary,
                     fontSize = 11.sp,
@@ -171,6 +214,17 @@ fun DayBarsSection(
         }
         Spacer(Modifier.height(14.dp))
         DayBars(days)
+        Spacer(Modifier.height(6.dp))
+        // State the scale. A bar chart without one invites the reader to
+        // compare heights across screens where the peak differs.
+        Text(
+            "tallest day ${formatDuration(peak)}",
+            style = TextStyle(
+                color = LumenTheme.TextSecondary,
+                fontSize = 11.sp,
+                fontFamily = LumenTheme.TabularFigures,
+            ),
+        )
     }
 }
 
