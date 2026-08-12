@@ -85,6 +85,29 @@ class KnowledgeCImporterTest {
     private fun import(db: File, sinceMs: Long = 0L) =
         KnowledgeCImporter(device, db).import(sinceMs)
 
+    /**
+     * The imported history follows the same inclusion rule as the live stream
+     * (`docs/design-spec.md`, LO's decision in `248446f`). Apple's Screen Time
+     * store has been recording Lumen's own frontmost time all along; dropping
+     * those rows on import would make imported history disagree with live
+     * tracking, which is the one inconsistency a screen-time app cannot have.
+     */
+    @Test
+    fun `imported history includes lumen's own rows`() {
+        val db = buildStore(
+            rows = listOf(
+                Triple("com.apple.Safari", noonMs, noonMs + 300_000),
+                Triple("dev.lumen.macos", noonMs + 300_000, noonMs + 900_000),
+            ),
+        )
+
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(import(db))
+        assertEquals(
+            listOf("com.apple.Safari", "dev.lumen.macos"),
+            imported.events.map { it.appKey.value },
+        )
+    }
+
     @Test
     fun `maps focus rows to events with correct epoch conversion`() {
         val db = buildStore(
