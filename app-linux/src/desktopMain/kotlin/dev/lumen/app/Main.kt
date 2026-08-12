@@ -82,11 +82,38 @@ fun main() = application {
 
         val liveMs = if (liveSinceMs > 0) (now - liveSinceMs).coerceAtLeast(0) else 0
 
+        val reducedMotion = remember { reducedMotionEnabled() }
+
         TodayScreen(
             totals = totals,
             totalMs = day.totalMs() + liveMs,
             liveApp = liveApp,
-            reducedMotion = false,
+            reducedMotion = reducedMotion,
         )
     }
 }
+
+/**
+ * Whether the desktop asks for reduced motion.
+ *
+ * `docs/design-spec.md` requires respecting it on every platform, and this
+ * was hardcoded to false — so the setting was honoured on macOS and silently
+ * ignored on Linux, which is worse than not claiming to support it.
+ *
+ * Wayland has no single answer, so this reads the GNOME/GTK key that the
+ * toolkits actually consult; wlroots compositors inherit it through
+ * `gsettings` on most distributions. Falls back to on-by-default motion when
+ * the setting cannot be read, because a missing key is not a request.
+ */
+private fun reducedMotionEnabled(): Boolean = runCatching {
+    val p = ProcessBuilder(
+        "gsettings", "get", "org.gnome.desktop.interface", "enable-animations",
+    ).redirectErrorStream(false).start()
+    val out = p.inputStream.bufferedReader().readText().trim()
+    if (!p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+        p.destroyForcibly()
+        false
+    } else {
+        out == "false"
+    }
+}.getOrDefault(false)

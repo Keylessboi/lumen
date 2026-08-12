@@ -85,10 +85,21 @@ class UsageStore(
      * duplicate.
      */
     fun earliestEventMs(): Long? =
-        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
-            .asSequence()
+        eventFiles()
             .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
             .minOfOrNull { it.startedAtMs }
+
+    /**
+     * The end of Lumen's own coverage — the last moment it recorded — or null
+     * when it has recorded nothing.
+     *
+     * Pairs with [earliestEventMs] to bound the two importable ranges: before
+     * Lumen ever ran, and since it last ran.
+     */
+    fun latestEventMs(): Long? =
+        eventFiles()
+            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
+            .maxOfOrNull { it.startedAtMs + it.durationMs }
 
     /**
      * One past the highest seq the store holds, so an import continues the
@@ -100,8 +111,7 @@ class UsageStore(
      * app-macos migrates.
      */
     fun nextSeq(): Long =
-        ((root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
-            .asSequence()
+        (eventFiles()
             .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
             .maxOfOrNull { it.seq } ?: -1L) + 1L
 
@@ -263,8 +273,7 @@ class UsageStore(
      * drift out of step with what is actually on disk.
      */
     fun recordedDays(zone: TimeZone = displayZone()): List<String> =
-        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
-            .asSequence()
+        eventFiles()
             .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
             .map { LocalDay.dayOf(it.startedAtMs, zone) }
             .distinct()
@@ -299,6 +308,10 @@ class UsageStore(
             )
         }
     }
+
+    private fun eventFiles(): Sequence<File> =
+        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
+            .asSequence()
 
     private fun readEvents(dayUtc: String): List<FocusEvent> {
         val f = File(root, "events-$dayUtc.ndjson")

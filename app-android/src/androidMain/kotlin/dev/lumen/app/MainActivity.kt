@@ -33,6 +33,25 @@ import kotlinx.coroutines.delay
  */
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Whether the system asks for reduced motion.
+     *
+     * `docs/design-spec.md` requires respecting it on both platforms. This
+     * was hardcoded to false, so the setting worked on macOS and was silently
+     * ignored here — worse than not claiming support, because the spec says
+     * we do.
+     *
+     * `ANIMATOR_DURATION_SCALE` is the value Android's own accessibility
+     * "Remove animations" toggle writes, and what the platform widgets read.
+     */
+    private fun reducedMotionEnabled(): Boolean = runCatching {
+        android.provider.Settings.Global.getFloat(
+            contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+    }.getOrDefault(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val collector = UsageStatsCollector(applicationContext)
@@ -85,7 +104,7 @@ class MainActivity : ComponentActivity() {
                 totals = totals,
                 totalMs = day.totalMs() + liveMs,
                 liveApp = liveApp,
-                reducedMotion = false,
+                reducedMotion = remember { reducedMotionEnabled() },
                 historyState = when (permission) {
                     is PermissionState.Granted -> HistoryState.Hidden
                     is PermissionState.Required -> HistoryState.Message(

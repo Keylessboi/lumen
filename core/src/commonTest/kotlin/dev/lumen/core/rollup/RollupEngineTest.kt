@@ -149,6 +149,33 @@ class RollupEngineTest {
         assertEquals(RollupEngine.bucket(e), RollupEngine.bucket(e))
     }
 
+    @Test
+    fun `a pre-1970 timestamp still buckets to whole minutes`() {
+        // Kotlin's % keeps the sign of the dividend, so the obvious
+        // `t - (t % MINUTE)` yields a boundary AFTER the timestamp for
+        // negative epochs — which produced a "1-minute bucket" holding 90
+        // seconds. A device with a wrong clock, or a corrupt imported row,
+        // gets here.
+        val buckets = RollupEngine.bucket(event(startedAtMs = -90_000, durationMs = 120_000))
+
+        assertTrue(buckets.all { it.activeMs in 1..minute }, "no bucket may exceed one minute")
+        assertTrue(buckets.all { it.bucketTs % minute == 0L }, "boundaries stay minute-aligned")
+        assertTrue(buckets.first().bucketTs <= -90_000, "the first boundary contains the start")
+        assertEquals(120_000L, buckets.sumOf { it.activeMs }, "duration is still conserved")
+    }
+
+    @Test
+    fun `bucket boundaries never sit after the instant they contain`() {
+        for (start in listOf(-1L, -59_999L, -60_000L, -60_001L, 0L, 1L, 59_999L)) {
+            val buckets = RollupEngine.bucket(event(startedAtMs = start, durationMs = 90_000))
+            assertTrue(
+                buckets.first().bucketTs <= start,
+                "boundary ${buckets.first().bucketTs} is after start $start",
+            )
+            assertTrue(buckets.all { it.activeMs <= minute }, "start=$start produced an oversized bucket")
+        }
+    }
+
     // ---- dayTotal(): summing a day ----
 
     @Test

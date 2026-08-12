@@ -13,10 +13,18 @@ import kotlinx.coroutines.withTimeout
 import java.io.File
 
 /**
+ * MANUAL HARNESS — needs a real Hyprland session, so it is not a @Test.
+ *
+ * Was in `desktopMain` with a `fun main()`, which meant this collector -> engine -> SQLite
+ * harness was compiled into the shipped application. Moved to the test
+ * source set: it still runs on demand, and it no longer travels to users.
+ * Run with `runIntegrationHarness()` from a scratch main or a debugger.
+ *
+
  * Integration test: Hyprland collector -> RollupEngine -> SQLite store.
  * Proves the full data path on a real session. Not part of the shipped app.
  */
-fun main() = runBlocking {
+fun runIntegrationHarness() = runBlocking {
     val deviceId = DeviceId("integration-test-device")
     val dbFile = File("/tmp/lumen-integration.db")
     dbFile.delete()

@@ -188,7 +188,9 @@ private fun DayDetailPanel(detail: DayDetail, onClose: () -> Unit) {
                                 .weight((row.totalMs.toFloat() / max).coerceIn(0.01f, 1f))
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(LumenTheme.Accent),
+                                // Same colour the app has in the Today list:
+                                // one app, one colour, everywhere it appears.
+                                .background(LumenTheme.colorForKey(row.appKey.value)),
                         )
                         Spacer(Modifier.weight((1f - row.totalMs.toFloat() / max).coerceAtLeast(0.0001f)))
                     }
