@@ -1,6 +1,7 @@
 # Lumen — context and handover
 
-**Written 2026-08-12 by Agent B (Claude, macOS) at `7bbb7a2`.**
+**Written 2026-08-12 by Agent B (Claude, macOS) at `7bbb7a2`; extended the
+same day at `3a31502` — see §7 and §9.**
 For whoever picks this up next: a human, a fresh session, or Agent A.
 
 `docs/STATUS.md` says what state the repo is in. This says **why it is in that
@@ -141,15 +142,17 @@ asserted with a counting fake.
 
 ## 5. Where v1 actually stands
 
-**373 tests, `./gradlew build` green.** 35 PRs merged.
+**390 distinct tests, `./gradlew build` green.** 39 PRs merged. (808
+executions — `:core` and `:ui` commonTest run again under each Android
+variant. Count distinct tests or the number inflates without new coverage.)
 
 | Gate | State |
 |---|---|
 | `G1` Linux slice | collector written; A verified live before the dedupe and title fixes |
 | `G2` Android slice | **compile-verified only** — no device has run it |
 | `G3` sync + E2EE | **not started.** No XMPP client exists at all |
-| `G4` export/migrate | met in code: format, Argon2id + AES-GCM, UI, atomic writes |
-| `G5` categories | logic met: 185-entry registry, sticky overrides, corpus test |
+| `G4` export/migrate | components built and tested — **and not wired to anything**, so no user can make a backup (issue #57). "Met in code" was true component by component and false end to end |
+| `G5` categories | logic met, and now measured against a real machine (#58): 226 entries, 92.3% of recorded time |
 | `G6` nudge + polish | nudge done; design pass and RC not done |
 
 **M4 is the largest unbuilt piece of v1** — no XMPP client, no IBR, no provider
@@ -170,11 +173,9 @@ Agent A exists.
   Defensible only because `JvmLumenStore.open()` threw on every launch after
   the first until it was fixed, so no database has ever survived a restart.
   **That excuse expires the moment anyone ships.**
-- **`app-macos` is still on an NDJSON cache**, not `LumenStore`. A migration
-  exists (`NdjsonMigration`, 9 tests, archives rather than deletes) but is not
-  wired into the app.
-- **`deviceKeys` exports empty.** macOS has no keychain, so a restore cannot
-  resume a sync identity. Honest, incomplete.
+- ~~`app-macos` is still on an NDJSON cache~~ **Done (#55)**, and it found
+  the seq trap in §9 on the way.
+- ~~`deviceKeys` exports empty~~ **Done (#56)** — `MacosKeychain`.
 - **Android and Linux store in memory.** The surface is the real shared screen;
   the persistence behind it is not. Linux has `JvmLumenStore` for rollups but
   the trend chart is the only thing reading it.
@@ -205,26 +206,37 @@ pre-fix commit and left the fix on a closed branch — `main` was red for
 
 ## 7. What to do next
 
-**Unblocked, and mine by zone:**
+**The three items this section used to list are done** — see `docs/STATUS.md`
+for the state, and PRs #54, #55, #56, #58 for the reasoning.
 
-1. Wire `NdjsonMigration` into `app-macos` so it moves onto `LumenStore`. The
-   last structural inconsistency, and there is a real user with a month of
-   irreplaceable imported history — the migration archives rather than
-   deletes for that reason.
-2. `MacosKeychain`, so exports carry a real device identity.
-3. A real corpus pass on the category registry against an actual app
-   inventory, rather than the hand-written test list.
+Still mine:
 
-**Blocked:**
+1. **G4 is not reachable.** `ExportSection` is in `:ui`, `exportPayload()` is
+   in `UsageStore`, `BackupFiles.write()` writes atomically — and `Main.kt`
+   calls none of them, so a user cannot make a backup. `ExportSection` also
+   has no `onPassphraseChange`, so it has no input field. Issue #57. The gate
+   table said "met in code", which was true component by component and not
+   true end to end; that is the failure mode to watch for in the other gate
+   rows too.
+2. `tools/sync-test-server` and the ciphertext verifier — still needs A's M4
+   envelope.
+3. Marketing kit — still held by LO. Art direction approved: *instrument, not
+   advertisement*; the product's own visual language, no people, no stock
+   desks.
 
-- `tools/sync-test-server` and the ciphertext verifier — needs A's M4 envelope.
-- Marketing kit — held by LO. Art direction approved: *instrument, not
-  advertisement*; the product's own visual language, no people, no stock desks.
+**Waiting on A, not on work:** PR #58 curates `registry.tsv` (mine) but its
+generated form `GeneratedRegistry.kt` is in `core/src/commonMain` (theirs), so
+the PR carries the curation and cannot carry its effect. Either A runs
+`build-registry.py`, or generated artifacts move to `SHARED` in the ownership
+check. A generated file has no independent authorship, so the second seems
+right — but the matrix is a two-agent contract and not one agent's to edit.
 
 **Agent A's, and the critical path:** M4 transport and sync, M3 device matrix,
-G1 re-verification after the collector fixes.
-
----
+G1 re-verification after the collector fixes. Plus one thing found from here:
+`app-linux` builds `FocusSessionTracker(deviceId)` counting from 0 on every
+launch and inserts straight into the store, which is the seq trap in §9 below.
+Unconfirmed from a Mac; it would look like a day that stops growing after a
+restart.
 
 ## 8. Mistakes made tonight, so they are not repeated
 
@@ -249,3 +261,50 @@ Recorded because a handover that only lists wins is not a handover.
 - **Two self-inflicted UI regressions**, both caught only by screenshotting:
   colour collisions after keying colour off the app id, and a full-page scroll
   that fixed clipping by making the window content taller than the window.
+
+---
+
+## 9. What the second night added
+
+Four things worth carrying forward, all of them found the same way — by
+running the thing and looking at it, rather than by reading it.
+
+**The seq trap, and why it was invisible.** `(device_id, seq)` is the primary
+key and `insertEvent` is `INSERT OR IGNORE`, so a colliding seq is **not an
+error** — the row is silently discarded. `FocusSessionTracker` numbers from 0
+on every launch, and the real NDJSON on this Mac shows exactly that: seq 12,
+13, 14, then 0, 1 where the app was restarted. Under NDJSON nothing read seq,
+so it cost nothing. Against the store, every session after the first would
+have vanished on write with no error and no log. The general shape: **a field
+that nothing reads is not a field that is correct**, and moving to a store
+that reads it is the moment you find out.
+
+**"Archives rather than deletes" was not true.** `File.renameTo` is
+`rename(2)` on macOS and replaces the destination silently. Running the
+migration a second time — which an older build still running is enough to
+cause — archived a 2-line file over the 223-line archive of the same day.
+Found only by running it twice for real. And the deeper bug underneath it: the
+old idempotence test passed because the archiving step always succeeded, so
+nothing ever exercised the path where a source is read again. **A guarantee
+that depends on a step that always works in tests is not yet a guarantee.**
+
+**The corpus test tested the author's memory.** Eighteen apps, hand-written,
+by the same person who wrote the registry. Measured against a real machine it
+was 26% of installed apps and 81% of recorded time — and, more usefully, it
+surfaced a class of bug a longer hand-written list would never have found:
+`blender` was in the registry under the Linux WM class only, so the same app
+was categorised on one platform and Uncategorized on the other. §3's pattern
+again, in the data rather than the code. **Weight coverage by time**: an app
+used four hours a day and an app opened once are not the same fact.
+
+**The render is still the test.** Both UI bugs in #54 compiled, passed, and
+were visible only in a screenshot — and the worse of the two only appeared in
+the state a *new* user sees, with the history banner up. So screenshot the
+first-run state too, not just the state your own machine happens to be in.
+
+### Still true, and worth repeating
+
+The heuristic from §3 has not stopped paying: `RollupEngine`, `LocalDay`,
+`SystemUiFilter`, `AppNameResolver` are all in `core` because a second
+implementation was about to be written. The registry gap above is the same
+pattern one level down, in data rather than code.
