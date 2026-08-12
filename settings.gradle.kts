@@ -16,6 +16,7 @@ dependencyResolutionManagement {
 rootProject.name = "lumen"
 
 include(":core")
+include(":ui")
 include(":transport-xmpp")
 include(":app-linux")
 include(":app-android")

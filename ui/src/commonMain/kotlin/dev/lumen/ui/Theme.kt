@@ -1,4 +1,4 @@
-package dev.lumen.macos.ui
+package dev.lumen.ui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
