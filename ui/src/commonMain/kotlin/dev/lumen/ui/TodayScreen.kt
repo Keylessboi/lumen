@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import dev.lumen.ui.charts.DayBarsSection
+import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,6 +54,12 @@ fun TodayScreen(
      * that cannot yet supply history shows no empty frame.
      */
     recentDays: List<DayTotal> = emptyList(),
+    /** Running mean across every complete day on record; null before any. */
+    averageMs: Long? = null,
+    selectedDay: String? = null,
+    dayDetail: DayDetail? = null,
+    onSelectDay: (String) -> Unit = {},
+    onClearDaySelection: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onImport: () -> Unit = {},
     onDismissHistory: () -> Unit = {},
@@ -111,11 +118,20 @@ fun TodayScreen(
                 "Nothing recorded yet. Switch between a couple of apps and they'll appear here.",
                 style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
             )
+            // Same reason as the weight above: keep the trend section at the
+            // bottom even with no rows at all.
+            Spacer(Modifier.weight(1f))
         } else {
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.weight(1f, fill = false),
+                // fill = true so the list takes the leftover height and the
+                // trend section below stays pinned to the bottom of the
+                // window. With fill = false the chart floated up whenever few
+                // apps had been used, so the same screen sat in a different
+                // place depending on the day — and a chart that moves is one
+                // you have to re-find every time you look.
+                modifier = Modifier.weight(1f),
             ) {
                 items(totals, key = { it.appKey.value }) { row ->
                     AppRow(
@@ -133,7 +149,15 @@ fun TodayScreen(
         // fresh install has no empty frame.
         if (recentDays.isNotEmpty()) {
             Spacer(Modifier.height(28.dp))
-            DayBarsSection(title = "RECENT DAYS", days = recentDays)
+            DayBarsSection(
+                title = "RECENT DAYS",
+                days = recentDays,
+                averageMs = averageMs,
+                selectedDay = selectedDay,
+                detail = dayDetail,
+                onSelectDay = onSelectDay,
+                onClearSelection = onClearDaySelection,
+            )
         }
     }
 }

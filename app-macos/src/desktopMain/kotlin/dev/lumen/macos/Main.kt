@@ -22,6 +22,7 @@ import dev.lumen.macos.startup.LoginItem
 import dev.lumen.macos.store.UsageStore
 import dev.lumen.macos.ui.LumenTrayIcon
 import dev.lumen.ui.AppTotal
+import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
@@ -50,6 +51,9 @@ fun main() = application {
     var liveSinceMs by remember { mutableStateOf(0L) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var currentDay by remember { mutableStateOf(store.today()) }
+    var averageMs by remember { mutableStateOf<Long?>(null) }
+    var selectedDay by remember { mutableStateOf<String?>(null) }
+    var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
     var windowVisible by remember { mutableStateOf(!launchedAtLogin()) }
     var launchAtLogin by remember { mutableStateOf(LoginItem.isEnabled()) }
 
@@ -58,6 +62,19 @@ fun main() = application {
     LaunchedEffect(Unit) {
         totals = store.totalsFor(store.today())
         recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
+        averageMs = store.runningDailyAverageMs()
+
+        // Imported Screen Time history carries bundle ids only, so a month of
+        // recovered usage renders as "com.spotify.client". Resolve real names
+        // once for everything in view, then redraw. Done after the first
+        // paint rather than before it: a name is worth waiting a moment for,
+        // an empty window is not.
+        val visible = (recentDays.map { it.dayUtc } + store.today())
+            .distinct()
+            .flatMap { day -> store.totalsFor(day).map { it.appKey } }
+            .distinct()
+        store.resolveMissingNames(visible)
+        totals = store.totalsFor(store.today())
         collector.focusChanges().collect { change ->
             store.rememberName(change.appKey, change.displayName)
             tracker.onChange(change)?.let { closed ->
@@ -84,6 +101,10 @@ fun main() = application {
                 currentDay = today
                 totals = store.totalsFor(today)
                 recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
+                // Yesterday just became a complete day, so it now counts.
+                averageMs = store.runningDailyAverageMs()
+                selectedDay = null
+                dayDetail = null
                 lastChartRefreshMs = now
             } else {
                 if (totals.isNotEmpty() || liveSinceMs > 0) totals = store.totalsFor(today)
@@ -168,6 +189,30 @@ fun main() = application {
             TodayScreen(
                 totals = totals,
                 recentDays = recentDays,
+                averageMs = averageMs,
+                selectedDay = selectedDay,
+                dayDetail = dayDetail,
+                onSelectDay = { day ->
+                    if (day == selectedDay) {
+                        selectedDay = null
+                        dayDetail = null
+                    } else {
+                        selectedDay = day
+                        // Imported history carries bundle ids only; fill in
+                        // real names before showing them.
+                        store.resolveMissingNames(store.totalsFor(day).map { it.appKey })
+                        val dayTotals = store.totalsFor(day)
+                        dayDetail = DayDetail(
+                            dayUtc = day,
+                            totalMs = dayTotals.sumOf { it.totalMs },
+                            totals = dayTotals,
+                        )
+                    }
+                },
+                onClearDaySelection = {
+                    selectedDay = null
+                    dayDetail = null
+                },
                 totalMs = totalMs,
                 liveApp = liveApp,
                 reducedMotion = reducedMotionEnabled(),
@@ -197,6 +242,7 @@ fun main() = application {
                     history = when (val r = result) {
                         is KnowledgeCImporter.Result.Imported -> {
                             store.appendImported(r.events)
+                            store.resolveMissingNames(r.events.map { it.appKey }.distinct())
                             val today = store.today()
                             totals = store.totalsFor(today)
                             // The whole point of an import is the days behind

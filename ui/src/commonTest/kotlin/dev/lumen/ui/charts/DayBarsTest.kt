@@ -103,4 +103,61 @@ class DayBarsTest {
     fun `an empty range is empty rather than a stray dash`() {
         assertEquals("", dateRangeLabel(emptyList()))
     }
+
+    // ---- running average (LO: "averaged with all the weeks before that") ----
+
+    @Test
+    fun `the average spans every complete day, not just the window`() {
+        val days = listOf(
+            DayTotal("2026-08-09", 3_600_000),
+            DayTotal("2026-08-10", 7_200_000),
+            DayTotal("2026-08-11", 1_800_000),
+        )
+        assertEquals((3_600_000L + 7_200_000L + 1_800_000L) / 3, runningDailyAverageMs(days))
+    }
+
+    @Test
+    fun `the in-progress day is excluded from the average`() {
+        // Otherwise the line sinks every morning and recovers every evening,
+        // which looks like a trend and is an artefact of the clock.
+        val days = listOf(
+            DayTotal("2026-08-10", 7_200_000),
+            DayTotal("2026-08-11", 7_200_000),
+            DayTotal("2026-08-12", 60_000, isToday = true),
+        )
+        assertEquals(7_200_000L, runningDailyAverageMs(days))
+    }
+
+    @Test
+    fun `with no complete day there is no average, rather than zero`() {
+        // A mean of nothing is not zero, and a zero line invites comparison.
+        assertEquals(null, runningDailyAverageMs(emptyList()))
+        assertEquals(null, runningDailyAverageMs(listOf(DayTotal("2026-08-12", 60_000, isToday = true))))
+    }
+
+    @Test
+    fun `days with nothing recorded still count toward the average`() {
+        // A day off is part of the picture; dropping it would make the mean
+        // describe only the days you were busy.
+        val days = listOf(DayTotal("2026-08-10", 7_200_000), DayTotal("2026-08-11", 0))
+        assertEquals(3_600_000L, runningDailyAverageMs(days))
+    }
+
+    @Test
+    fun `the average stays inside the chart when it exceeds every bar`() {
+        // A quiet week can sit below the all-time mean; the scale has to
+        // include the line or it would be drawn off the top.
+        val average = 7_200_000L
+        val quietDay = 600_000L
+        val peak = maxOf(quietDay, average)
+        assertTrue(barFraction(average, peak) <= 1f)
+        assertEquals(1f, barFraction(average, peak))
+    }
+
+    // ---- day labels ----
+
+    @Test
+    fun `a selected day is named in full`() {
+        assertEquals("Tue, Aug 11", longDayLabel("2026-08-11"))
+    }
 }
