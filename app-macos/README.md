@@ -1,15 +1,39 @@
 # app-macos
 
 **Owner:** Agent B (`docs/plan.md`, machine split at M0)
-**Status:** Runs. Local-only vertical slice: collector → session tracker → local store → Today screen.
+**Status:** Runs, as a menu-bar app. collector → session tracker → local store → tray + Today window.
 
 ```bash
+# Dev loop — runs from Gradle, shows as "java" in TCC, no login item.
 ./gradlew :app-macos:run
+
+# Real app — shows as "Lumen" in TCC, supports launch-at-login. Use this
+# to actually grant Full Disk Access or enable "Launch at login".
+./gradlew :app-macos:createDistributable
+open app-macos/build/compose/binaries/main/app/Lumen.app
 ```
 
 No account, no sync, no network. No permission prompts either, unless you opt into the history import below. `docs/plan.md` locks local-only as the default posture — *"sync additive, never a dependency"*, *"unconfigured transport valid"* — so a local-only build is a complete slice rather than a stub, and it satisfies the v1 criterion *"Local-first: sync never blocks"* on its own.
 
-**Note on the dev-mode self-reading.** Launched via `./gradlew :app-macos:run` the app sees itself as `net.java.openjdk.java` / "MainKt", because a bare JVM process has no bundle identity. Packaged (`./gradlew :app-macos:packageDmg`) it appears correctly as `dev.lumen.macos` / "Lumen". Lumen deliberately does **not** filter itself out of its own totals — time spent reading your screen-time app is still screen time, and hiding it would be exactly the kind of flattering lie the design spec rules out.
+Lumen deliberately does **not** filter itself out of its own totals — time spent reading your screen-time app is still screen time, and hiding it would be exactly the kind of flattering lie the design spec rules out.
+
+## Menu bar, not a Dock app
+
+`LSUIElement=true` in the packaged `Info.plist`: no Dock icon, no Cmd-Tab entry, no app-switcher presence. The tray icon (`ui/TrayIcon.kt`, drawn rather than shipped as a binary asset — a ring with a filled core, monochrome so it follows the menu bar's light/dark/highlight state rather than fighting it) is the primary surface. Verified live: macOS itself reports the packaged process as background-only (`System Events` → `background only` = true).
+
+The tray menu shows today's total, the live app, and the top 5 by time — a glance, not a report. "Open Lumen" and clicking any app row both open the full window.
+
+**Tracking is tied to the application, not the window.** Closing the window hides it; the `LaunchedEffect` collecting focus changes lives at the `application` scope and keeps running. Quit is the one thing that stops tracking, and it is a single explicit menu item — never accidental, via `onCloseRequest` on the window doing nothing but hiding it.
+
+## Launch at login (`startup/LoginItem.kt`)
+
+A per-user `launchd` LaunchAgent — a plist in `~/Library/LaunchAgents`, toggled from the tray menu. Chosen over `SMAppService`/`SMLoginItemSetEnabled` because it needs no native bridge and no helper target, and because the user can see and delete it themselves in `~/Library/LaunchAgents`, which suits a FOSS tracker better than a mechanism they cannot inspect.
+
+`RunAtLoad` only — **deliberately no `KeepAlive`**. An agent that relaunches itself the instant it's killed is malware behaviour, and it would make Quit meaningless. If you quit Lumen, it stays quit until next login.
+
+**Only works from the packaged app**, and fails closed otherwise: `isSupported()` returns false under `./gradlew :app-macos:run` because there is no stable executable to point a login item at — only a transient JVM invocation that would produce an agent that fails silently every login. The tray menu simply omits the "Launch at login" item in that case rather than offering something broken. Verified live: `isSupported()` is `false` from Gradle and the real `enable()`/`disable()` cycle against the packaged app was run end-to-end — `launchctl print` confirmed `state = running` while enabled, and confirmed the service was gone after disable.
+
+Launch-at-login also changes first-run behaviour: `launchedAtLogin()` checks `XPC_SERVICE_NAME` for the agent's label, and if launchd started the app, the window stays hidden — no window thrown at someone who is still logging in. It opens from the tray on demand as usual.
 
 ---
 
@@ -105,22 +129,44 @@ The Today screen states the number and never evaluates it. No streaks, no badges
 
 ```
 $ ./gradlew :app-macos:desktopTest
-BUILD SUCCESSFUL — 35 tests, 0 failures
+BUILD SUCCESSFUL — 41 tests, 0 failures
 ```
 
-End-to-end on macOS 15 / arm64, running the real app against the live system:
+Real focus transitions, real durations, resolved names, persisted across restart, from `./gradlew :app-macos:run`:
 
 ```
 $ cat ~/Library/Application\ Support/Lumen/events-2026-08-12.ndjson
 {"seq":0,"deviceId":"0af18d53-...","appKey":"net.java.openjdk.java",
  "startedAtMs":1786495295405,"durationMs":8246}
-
-$ cat ~/Library/Application\ Support/Lumen/app-names.tsv
-net.java.openjdk.java	MainKt
-com.anthropic.claudefordesktop	Claude
 ```
 
-Real focus transitions, real durations, resolved names, persisted across restart. No permission dialog appeared at any point, confirming the TCC analysis above.
+The packaged app, launched with `open Lumen.app`, correctly reports its own bundle identity instead of the dev-mode JVM identity:
+
+```
+{"seq":0,"deviceId":"0af18d53-...","appKey":"dev.lumen.macos",
+ "startedAtMs":1786497209454,"durationMs":6246}
+```
+
+macOS itself confirms `LSUIElement` took effect — the packaged process is background-only:
+
+```
+$ osascript -e 'tell application "System Events" to
+    (name of every process whose background only is true) contains "Lumen"'
+true
+```
+
+Launch-at-login exercised against the real packaged executable, not mocked — `enable()` then `launchctl print`, then `disable()`:
+
+```
+$ launchctl print gui/501/dev.lumen.macos
+  state = running
+  program = .../Lumen.app/Contents/MacOS/Lumen
+
+$ launchctl print gui/501/dev.lumen.macos   # after disable()
+Could not find service "dev.lumen.macos" in domain for user gui: 501
+```
+
+No permission dialog appeared at any point for live tracking, confirming the TCC analysis above.
 
 ---
 
@@ -131,3 +177,4 @@ Real focus transitions, real durations, resolved names, persisted across restart
 - The `NSWorkspace` bridge and IOKit idle detection (see the mechanism table above).
 - Day curve and 7/30-day charts — the spec allows exactly three chart types; only the Today bars exist so far.
 - Sync. Local-only is the point, not a limitation.
+- Notarization/code signing for distribution outside this machine — `createDistributable` produces a locally runnable `.app`; a `.dmg` for another Mac needs signing.
