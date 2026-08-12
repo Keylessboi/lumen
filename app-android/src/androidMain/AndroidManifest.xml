@@ -2,11 +2,20 @@
 <!-- app-android — OWNER: Agent A. M3 scaffold.
      allowBackup=false is LOCKED (docs/plan.md #10): Android auto-backup
      would exfiltrate the local DB to Google Drive in plaintext. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Usage Access: the ONLY permission lumen needs on Android.
          Not a runtime permission — user grants via Settings → Usage Access. -->
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Lint flags this as a system-app permission, and it is: it is
+         signature|appop. Declaring it is nevertheless required and correct —
+         it is what puts Lumen in the Usage Access list so the user can grant
+         it there. Without the declaration the app cannot be granted access at
+         all. Suppressed knowingly rather than by baseline, so the reason is
+         next to the line. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="false"
