@@ -1,6 +1,7 @@
 package dev.lumen.core.crypto
 
 import dev.lumen.core.model.DeviceId
+import kotlinx.serialization.Serializable
 
 /**
  * E2EE seam — FROZEN at M1; envelope format normative in docs/e2ee.md.
@@ -39,6 +40,7 @@ interface E2EE {
  * app count. Optional in v1; present so the wire format never needs a
  * version bump to add it.
  */
+@Serializable
 data class EncryptedPayload(
     val version: Int = 1,
     val senderDeviceId: DeviceId,
