@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +60,37 @@ fun DayBarsSection(
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             dev.lumen.ui.SectionLabel(title)
+
+            // The average legend sits ON the header row rather than under the
+            // chart. Below the chart it was a stray line at the bottom of the
+            // window with open space beneath it; here it reads as part of the
+            // section's title, and the chart gets that height back.
+            if (averageMs != null) {
+                Spacer(Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        repeat(4) {
+                            Spacer(
+                                Modifier
+                                    .width(4.dp)
+                                    .height(1.dp)
+                                    .background(LumenTheme.TextSecondary.copy(alpha = 0.55f)),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Daily average, all weeks — ${formatDuration(averageMs)}",
+                        style = TextStyle(
+                            color = LumenTheme.TextSecondary,
+                            fontSize = 11.sp,
+                            fontFamily = LumenTheme.TabularFigures,
+                            fontFeatureSettings = "tnum",
+                        ),
+                    )
+                }
+            }
+
             Spacer(Modifier.weight(1f))
             // Anchors the weekday axis to real dates: weekdays alone say
             // which days, never which week.
@@ -79,34 +113,6 @@ fun DayBarsSection(
             onSelectDay = onSelectDay,
         )
 
-        if (averageMs != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // A short dashed swatch, so the label is tied to the line in
-                // the plot without needing colour to do it.
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    repeat(4) {
-                        Spacer(
-                            Modifier
-                                .width(4.dp)
-                                .height(1.dp)
-                                .background(LumenTheme.TextSecondary.copy(alpha = 0.55f)),
-                        )
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                // Named for what it is. "Daily average" alone would be read
-                // as this week's, which is the thing it deliberately is not.
-                Text(
-                    "Daily average, all weeks — ${formatDuration(averageMs)}",
-                    style = TextStyle(
-                        color = LumenTheme.TextSecondary,
-                        fontSize = 11.sp,
-                        fontFamily = LumenTheme.TabularFigures,
-                    ),
-                )
-            }
-        }
 
         if (detail != null) {
             Spacer(Modifier.height(18.dp))
@@ -162,7 +168,12 @@ private fun DayDetailPanel(detail: DayDetail, onClose: () -> Unit) {
         } else {
             val max = detail.totals.maxOf { it.totalMs }.coerceAtLeast(1L)
             val colors = LumenTheme.colorsFor(detail.totals.map { it.appKey.value })
-            detail.totals.take(DETAIL_ROWS).forEach { row ->
+            // Scrolls inside the panel rather than truncating at eight and
+            // adding a "+ N more" the user cannot expand. The apps in a day
+            // are exactly what the panel is for; a footnote saying they exist
+            // is not the same as showing them.
+            LazyColumn(Modifier.heightIn(max = DETAIL_MAX_HEIGHT)) {
+              items(detail.totals, key = { it.appKey.value }) { row ->
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -197,17 +208,17 @@ private fun DayDetailPanel(detail: DayDetail, onClose: () -> Unit) {
                         ),
                     )
                 }
-            }
-            if (detail.totals.size > DETAIL_ROWS) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "+ ${detail.totals.size - DETAIL_ROWS} more",
-                    style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 11.sp),
-                )
+              }
             }
         }
     }
 }
 
-/** Enough to see the shape of a day without turning the panel into a report. */
-private const val DETAIL_ROWS = 8
+/**
+ * Cap on the panel's height, not on its content.
+ *
+ * The panel scrolls past this, so every app in the day is reachable — but it
+ * never grows tall enough to push its own bottom edge off the window, which
+ * is what happened when it sized to content.
+ */
+private val DETAIL_MAX_HEIGHT = 208.dp

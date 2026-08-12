@@ -24,4 +24,14 @@ data class AppTotal(
     val appKey: AppKey,
     val displayName: String,
     val totalMs: Long,
+    /**
+     * The app's category display name, or null when it has not been resolved.
+     *
+     * Carried on the row rather than looked up by the UI so that colour can
+     * tie an app to its category: the summary strip and the app list then
+     * show the same data at two levels instead of competing for the same
+     * space. Null is legitimate — a platform without a category engine wired
+     * up passes rows without one and the screen still draws.
+     */
+    val category: String? = null,
 )

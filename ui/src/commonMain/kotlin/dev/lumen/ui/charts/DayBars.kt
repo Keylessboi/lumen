@@ -124,7 +124,7 @@ fun DayBars(
     averageMs: Long? = null,
     selectedDay: String? = null,
     onSelectDay: (String) -> Unit = {},
-    barHeight: androidx.compose.ui.unit.Dp = 132.dp,
+    barHeight: androidx.compose.ui.unit.Dp = 168.dp,
 ) {
     if (days.isEmpty()) return
 

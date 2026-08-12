@@ -94,6 +94,14 @@ fun main() = application {
         categoryEngine
             .summarize(dayTotals.associate { it.appKey to it.totalMs })
             .map { CategorySlice(it.category.displayName, it.totalMs) }
+
+    /**
+     * Attach each app's category to its row, so the UI can colour the row to
+     * match the summary strip. Resolved here rather than in the UI because
+     * the engine — registry plus the user's sticky overrides — is app state.
+     */
+    fun withCategories(dayTotals: List<AppTotal>): List<AppTotal> =
+        dayTotals.map { it.copy(category = categoryEngine.categoryOf(it.appKey).displayName) }
     var selectedDay by remember { mutableStateOf<String?>(null) }
     var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
     var windowVisible by remember { mutableStateOf(!launchedAtLogin()) }
@@ -102,7 +110,7 @@ fun main() = application {
     // Collection is tied to the application, NOT to the window. The window is
     // a view onto it; hiding the window must not stop tracking.
     LaunchedEffect(Unit) {
-        totals = store.totalsFor(store.today())
+        totals = withCategories(store.totalsFor(store.today()))
         recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
         averageMs = store.runningDailyAverageMs()
         categories = categorySlices(totals)
@@ -117,13 +125,13 @@ fun main() = application {
             .flatMap { day -> store.totalsFor(day).map { it.appKey } }
             .distinct()
         store.resolveMissingNames(visible)
-        totals = store.totalsFor(store.today())
+        totals = withCategories(store.totalsFor(store.today()))
         categories = categorySlices(totals)
         collector.focusChanges().collect { change ->
             store.rememberName(change.appKey, change.displayName)
             tracker.onChange(change)?.let { closed ->
                 store.append(closed)
-                totals = store.totalsFor(store.today())
+                totals = withCategories(store.totalsFor(store.today()))
             }
             liveApp = change.displayName ?: change.appKey.value
             liveSinceMs = change.atMs
@@ -147,7 +155,7 @@ fun main() = application {
                 // but the part of it that belongs to yesterday stops counting
                 // toward today; see liveMs below.
                 currentDay = today
-                totals = store.totalsFor(today)
+                totals = withCategories(store.totalsFor(today))
                 categories = categorySlices(totals)
                 recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
                 // Yesterday just became a complete day, so it now counts.
@@ -157,7 +165,7 @@ fun main() = application {
                 lastChartRefreshMs = now
             } else {
                 if (totals.isNotEmpty() || liveSinceMs > 0) {
-                    totals = store.totalsFor(today)
+                    totals = withCategories(store.totalsFor(today))
                     categories = categorySlices(totals)
                 }
                 // Today's own bar should grow during the day, but re-deriving
@@ -351,7 +359,7 @@ fun main() = application {
                             store.appendImported(r.events)
                             store.resolveMissingNames(r.events.map { it.appKey }.distinct())
                             val today = store.today()
-                            totals = store.totalsFor(today)
+                            totals = withCategories(store.totalsFor(today))
                             // The whole point of an import is the days behind
                             // today, so refresh the trend view too.
                             recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)

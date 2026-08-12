@@ -3,6 +3,8 @@ package dev.lumen.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +14,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import dev.lumen.core.model.AppTotal
@@ -70,6 +71,10 @@ fun TodayScreen(
     onImport: () -> Unit = {},
     onDismissHistory: () -> Unit = {},
 ) {
+    // The page does NOT scroll. Scrolling the whole screen made the window
+    // content taller than the window, which is worse than the problem it
+    // solved. Everything fits; the one list that can outgrow its space
+    // scrolls inside itself.
     Column(
         Modifier
             .fillMaxSize()
@@ -111,7 +116,14 @@ fun TodayScreen(
 
         if (historyState != HistoryState.Hidden) Spacer(Modifier.height(20.dp))
 
-        if (totals.isEmpty()) {
+        // When a day is open, its apps ARE the app list — showing today's
+        // list above it wastes the space twice and leaves an empty band where
+        // the reader is looking. So the section is replaced, not stacked.
+        val dayIsOpen = dayDetail != null
+
+        if (dayIsOpen) {
+            Spacer(Modifier.height(4.dp))
+        } else if (totals.isEmpty()) {
             Text(
                 "Nothing recorded yet. Switch between a couple of apps and they'll appear here.",
                 style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
@@ -126,39 +138,36 @@ fun TodayScreen(
             Spacer(Modifier.height(10.dp))
 
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
-            // Resolved for the whole visible set so two rows are not the same
-            // colour, and resolved by key so the assignment does not change
-            // when rows reorder during the day.
-            val colors = LumenTheme.colorsFor(totals.map { it.appKey.value })
+            // Colour comes from the CATEGORY, not from the app key. That is
+            // what ties each row to the strip above it: the strip is these
+            // same numbers one level up, so a user can see at a glance which
+            // apps make up the green. Falling back to a per-app hue keeps
+            // rows distinguishable on a platform with no category engine
+            // wired up yet, where every category would otherwise be null.
+            val fallback = LumenTheme.colorsFor(totals.map { it.appKey.value })
+            // weight(1f) with an internal scroll: the list takes the space
+            // between the strip and the chart and scrolls within it. A
+            // fill = false version sized itself to the leftover space and cut
+            // the last row in half, which reads as a rendering fault.
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
-                // fill = true so the list takes the leftover height and the
-                // trend section below stays pinned to the bottom of the
-                // window. With fill = false the chart floated up whenever few
-                // apps had been used, so the same screen sat in a different
-                // place depending on the day — and a chart that moves is one
-                // you have to re-find every time you look.
-                // weight(1f, fill = false) plus a max height: the list takes
-                // only the room it needs, and the trend section sits under it
-                // rather than after a void. Pinning it to the bottom of a tall
-                // window meant one app produced a screen that was mostly gap.
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             ) {
                 items(totals, key = { it.appKey.value }) { row ->
                     AppRow(
                         row = row,
                         fraction = row.totalMs.toFloat() / max.toFloat(),
-                        color = colors[row.appKey.value] ?: LumenTheme.colorForKey(row.appKey.value),
+                        color = row.category
+                            ?.let { LumenTheme.colorForCategory(it) }
+                            ?: fallback[row.appKey.value]
+                            ?: LumenTheme.colorForKey(row.appKey.value),
                         reducedMotion = reducedMotion,
                     )
                 }
             }
         }
 
-        // Absorbs leftover height so the trend view stays bottom-anchored,
-        // but only AFTER the list has taken what it needs — so a light day
-        // shows a short list and a short gap, not a short list and a chasm.
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(22.dp))
 
         // Trend view last: today is what the screen is for, history is
         // context underneath it. Absent when there is none to show, so a
