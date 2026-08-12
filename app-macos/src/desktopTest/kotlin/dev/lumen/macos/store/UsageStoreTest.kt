@@ -6,6 +6,7 @@ import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -143,21 +144,60 @@ class UsageStoreTest {
         assertEquals(emptyList(), store.totalsFor("2026-01-01"))
     }
 
-    /** One bad line must not cost the whole day's history. */
-    @Test
-    fun `a corrupt line is skipped and the rest survives`() {
-        store.append(event("com.apple.Safari", noon, 60_000))
-        File(tmp, "events-$day.ndjson").appendText("{not valid json\n")
-        store.append(event("com.apple.Terminal", noon + 60_000, 30_000, seq = 1))
-
-        val totals = store.totalsFor(day)
-        assertEquals(2, totals.size)
-        assertEquals(60_000, totals.first { it.appKey.value == "com.apple.Safari" }.totalMs)
-    }
-
     @Test
     fun `events survive a restart`() {
         store.append(event("com.apple.Safari", noon, 90_000))
         assertEquals(90_000, UsageStore(tmp).totalsFor(day).single().totalMs)
+    }
+
+    /**
+     * The bug this store's move to LumenStore had to survive.
+     *
+     * `FocusSessionTracker` numbers its events from 0 on every launch, and
+     * `(device_id, seq)` is the primary key with `INSERT OR IGNORE` behind
+     * it. Trusting the caller's seq means the second session's events are
+     * silently discarded — no error, no log, a day that stops growing.
+     */
+    @Test
+    fun `a restarted seq counter does not drop the next session's events`() {
+        store.append(event("com.apple.Safari", noon, 60_000, seq = 0))
+        store.append(event("com.apple.Terminal", noon + 60_000, 60_000, seq = 1))
+
+        // A new run of the app, its tracker counting from zero again.
+        val restarted = UsageStore(tmp)
+        restarted.append(event("com.apple.Mail", noon + 120_000, 60_000, seq = 0))
+        restarted.append(event("com.apple.Notes", noon + 180_000, 60_000, seq = 1))
+
+        val totals = UsageStore(tmp).totalsFor(day)
+        assertEquals(4, totals.size, "events from the restarted session were dropped")
+        assertEquals(60_000, totals.first { it.appKey.value == "com.apple.Mail" }.totalMs)
+    }
+
+    @Test
+    fun `legacy NDJSON is migrated in on open and archived`() {
+        // The state every existing install is in: events in files, nothing in
+        // the database yet.
+        val device = UsageStore(tmp).deviceId()
+        File(tmp, "events-$day.ndjson").writeText(
+            Json.encodeToString(
+                FocusEvent.serializer(),
+                FocusEvent(
+                    seq = 0,
+                    deviceId = device,
+                    appKey = AppKey("com.apple.Safari"),
+                    startedAtMs = noon,
+                    durationMs = 120_000,
+                ),
+            ) + "\n",
+        )
+
+        val opened = UsageStore(tmp)
+
+        assertEquals(1, opened.migration.migratedEvents)
+        assertEquals(120_000, opened.totalsFor(day).single().totalMs)
+        assertTrue(File(tmp, "migrated/events-$day.ndjson").exists(), "the source was destroyed")
+        // Opening again must not re-import what it already holds.
+        assertEquals(0, UsageStore(tmp).migration.migratedEvents)
+        assertEquals(120_000, UsageStore(tmp).totalsFor(day).single().totalMs)
     }
 }

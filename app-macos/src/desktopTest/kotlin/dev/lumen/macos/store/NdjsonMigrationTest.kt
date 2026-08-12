@@ -1,5 +1,6 @@
 package dev.lumen.macos.store
 
+import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
@@ -25,7 +26,16 @@ class NdjsonMigrationTest {
     @AfterTest
     fun cleanup() = tmp.deleteRecursively().let { }
 
+    /**
+     * A day's worth of events, written into that day.
+     *
+     * The timestamps are derived from [day] rather than fixed: one file per
+     * UTC day is the whole shape of this cache, so two files cannot describe
+     * the same instant, and a fixture that says they can is asserting on
+     * something that cannot occur.
+     */
     private fun writeEvents(day: String, count: Int, startSeq: Long = 0L) {
+        val noon = UtcDay.boundary(day) + 12 * 3_600_000L
         val text = (0 until count).joinToString("\n") { i ->
             json.encodeToString(
                 FocusEvent.serializer(),
@@ -33,7 +43,7 @@ class NdjsonMigrationTest {
                     seq = startSeq + i,
                     deviceId = device,
                     appKey = AppKey("com.app.$i"),
-                    startedAtMs = 1_781_518_620_000L + i * 60_000L,
+                    startedAtMs = noon + i * 60_000L,
                     durationMs = 60_000L,
                 ),
             )
@@ -117,6 +127,69 @@ class NdjsonMigrationTest {
         NdjsonMigration.run(tmp, store, device)
 
         assertEquals(4, store.eventsAfter(device, -1L).size)
+    }
+
+    /**
+     * Found by running it twice for real: `File.renameTo` is `rename(2)` on
+     * macOS and replaces the destination without a word. The second run
+     * archived a 2-line file over the 223-line archive of the same day, which
+     * is exactly the loss "archives rather than deletes" exists to prevent.
+     */
+    @Test
+    fun `a second archive of the same day does not overwrite the first`() {
+        writeEvents("2026-06-15", 10)
+        NdjsonMigration.run(tmp, JvmLumenStore.inMemory(), device)
+        val firstArchive = File(tmp, "migrated/events-2026-06-15.ndjson").readLines()
+
+        // The same day reappears — an older build wrote it, or a restore did.
+        writeEvents("2026-06-15", 1, startSeq = 500)
+        NdjsonMigration.run(tmp, JvmLumenStore.inMemory(), device)
+
+        assertEquals(
+            firstArchive,
+            File(tmp, "migrated/events-2026-06-15.ndjson").readLines(),
+            "the first archive was written over",
+        )
+        assertTrue(
+            File(tmp, "migrated/events-2026-06-15.ndjson.1").exists(),
+            "the second file was not archived at all",
+        )
+    }
+
+    /**
+     * Idempotence must not depend on the archiving step. If a source cannot
+     * be moved aside it is read again next time, and the seq is rewritten on
+     * the way in — so seq cannot be what makes the second read harmless.
+     */
+    @Test
+    fun `a source that was never archived is not migrated twice`() {
+        writeEvents("2026-06-15", 6)
+        val store = JvmLumenStore.inMemory()
+        NdjsonMigration.run(tmp, store, device)
+
+        // Put the source back exactly as it was, as a failed move would.
+        File(tmp, "migrated/events-2026-06-15.ndjson")
+            .copyTo(File(tmp, "events-2026-06-15.ndjson"))
+        val second = NdjsonMigration.run(tmp, store, device)
+
+        assertEquals(0, second.migratedEvents, "the same history was inserted twice")
+        assertEquals(6, store.eventsAfter(device, -1L).size)
+    }
+
+    @Test
+    fun `a file left behind is reported rather than silently skipped`() {
+        writeEvents("2026-06-15", 2)
+        // A directory where the archived file would go: the move cannot
+        // succeed, and the report must not claim it did.
+        File(tmp, "migrated/events-2026-06-15.ndjson").also { it.mkdirs() }
+        // Every suffixed alternative is taken too.
+        for (n in 1 until 1_000) File(tmp, "migrated/events-2026-06-15.ndjson.$n").mkdirs()
+
+        val report = NdjsonMigration.run(tmp, JvmLumenStore.inMemory(), device)
+
+        assertEquals(0, report.filesMoved)
+        assertEquals(listOf("events-2026-06-15.ndjson"), report.filesLeftBehind)
+        assertTrue(File(tmp, "events-2026-06-15.ndjson").exists(), "the source vanished")
     }
 
     @Test
