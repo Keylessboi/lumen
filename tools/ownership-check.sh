@@ -58,6 +58,16 @@ SHARED=(
   "settings.gradle.kts"
   "build.gradle.kts"
   "gradle"
+  # Shared Compose Multiplatform UI (discussion #21, PR #23). Owned by
+  # neither agent on purpose: it renders docs/design-spec.md for all three
+  # platforms, so pinning it to one lane blocks the other on every visual
+  # change. Same rule as the build files — either agent may edit, the other
+  # reviews in the PR body. Theme.kt is the exception in spirit: Agent A owns
+  # the design spec, so token changes are A's call even when B makes the edit.
+  "ui"
+  # Campaign kit (LO assignment, discussion #16). Agent B builds it; listed
+  # here rather than in ZONE_B so A can correct a claim without a handoff.
+  "marketing"
   "gradle.properties"
   "tools/ownership-check.sh"
   ".github"
