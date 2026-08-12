@@ -431,6 +431,14 @@ private fun openingHistoryState(store: UsageStore): HistoryState {
                 }
                 append("The original files are kept, unchanged, in ")
                 append("~/Library/Application Support/Lumen/migrated.")
+                if (migration.filesLeftBehind.isNotEmpty()) {
+                    // Half-failed, and the user is the only one who can look
+                    // at the directory and see why.
+                    append(" ${migration.filesLeftBehind.size} could not be moved there and ")
+                    append("are still in the folder above it: ")
+                    append(migration.filesLeftBehind.joinToString(", "))
+                    append(".")
+                }
             },
         )
     }
