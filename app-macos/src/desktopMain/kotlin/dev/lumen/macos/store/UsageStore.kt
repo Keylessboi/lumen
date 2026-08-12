@@ -6,7 +6,7 @@ import dev.lumen.macos.names.SpotlightNameResolver
 import dev.lumen.core.clock.UtcDay
 import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
-import dev.lumen.ui.AppTotal
+import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.charts.DayTotal
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent

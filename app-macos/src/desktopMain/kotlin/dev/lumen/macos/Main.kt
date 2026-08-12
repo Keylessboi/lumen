@@ -21,7 +21,7 @@ import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.macos.startup.LoginItem
 import dev.lumen.macos.store.UsageStore
 import dev.lumen.macos.ui.LumenTrayIcon
-import dev.lumen.ui.AppTotal
+import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
 import dev.lumen.ui.HistoryState

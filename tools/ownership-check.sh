@@ -45,6 +45,7 @@ ZONE_A=(
 ZONE_B=(
   "core/src/commonTest"
   "app-macos"
+  "marketing"
   "tools/registry-builder"
   "tools/sync-test-server"
   "docs/e2ee.md"
@@ -58,16 +59,6 @@ SHARED=(
   "settings.gradle.kts"
   "build.gradle.kts"
   "gradle"
-  # Shared Compose Multiplatform UI (discussion #21, PR #23). Owned by
-  # neither agent on purpose: it renders docs/design-spec.md for all three
-  # platforms, so pinning it to one lane blocks the other on every visual
-  # change. Same rule as the build files — either agent may edit, the other
-  # reviews in the PR body. Theme.kt is the exception in spirit: Agent A owns
-  # the design spec, so token changes are A's call even when B makes the edit.
-  "ui"
-  # Campaign kit (LO assignment, discussion #16). Agent B builds it; listed
-  # here rather than in ZONE_B so A can correct a claim without a handoff.
-  "marketing"
   "gradle.properties"
   "tools/ownership-check.sh"
   ".github"
@@ -75,6 +66,15 @@ SHARED=(
   "LICENSE"
   ".gitignore"
   "docs"
+  "ui"
+)
+
+# Files with a single authority even inside a shared directory: shared zone
+# membership is overridden by an exact pinned match. `ui/Theme.kt` is the
+# executable copy of `docs/design-spec.md`, which is Agent A's; B may read it
+# and file issues against it, never edit it (discussion #21).
+PINNED_A=(
+  "ui/src/commonMain/kotlin/dev/lumen/ui/Theme.kt"
 )
 
 # Module-level build files are shared infra too (they configure targets for
@@ -104,6 +104,12 @@ violations=()
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
+  if in_zone "$file" "${PINNED_A[@]}"; then
+    if [ "$AGENT" != "A" ]; then
+      violations+=("$file")
+    fi
+    continue
+  fi
   if in_zone "$file" "${SHARED[@]}" || is_module_build_file "$file"; then
     continue
   fi
