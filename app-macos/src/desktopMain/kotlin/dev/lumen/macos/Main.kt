@@ -27,6 +27,9 @@ import dev.lumen.core.category.CategoryEngine
 import dev.lumen.core.category.GeneratedRegistry
 import dev.lumen.core.category.OverrideStore
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.nudge.BreakReminder
+import dev.lumen.core.nudge.NudgeSettings
+import dev.lumen.macos.notify.MacNotifier
 import dev.lumen.ui.charts.CategorySlice
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
@@ -59,6 +62,17 @@ fun main() = application {
     var currentDay by remember { mutableStateOf(store.today()) }
     var averageMs by remember { mutableStateOf<Long?>(null) }
     var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
+
+    // The one nudge in v1 (M7). Fed from the same focus stream that feeds
+    // tracking, so "at the screen" means the same thing to both.
+    val breakReminder = remember {
+        BreakReminder(
+            NudgeSettings(
+                enabled = store.overrides()[NudgeSettings.ENABLED_KEY] != "false",
+            ),
+        )
+    }
+    val notifier = remember { MacNotifier() }
 
     // The user's sticky overrides, read from the store. Registry lookups are
     // the shipped dataset; an override always wins and survives a dataset
@@ -113,6 +127,10 @@ fun main() = application {
             }
             liveApp = change.displayName ?: change.appKey.value
             liveSinceMs = change.atMs
+
+            // A focus change IS activity. Idle transitions reset the streak,
+            // which is what makes this "continuous time" rather than a timer.
+            breakReminder.onActivity(change.atMs, isIdle = change.isIdle)?.let(notifier::notify)
         }
     }
 
