@@ -33,8 +33,11 @@ import java.nio.file.Path
  *   1. WM_CLASS / app_id (the `class` field) — matches desktop-file ids
  *      for well-behaved apps (chromium -> chromium.desktop).
  *   2. Falls back to the process comm from /proc/<pid>/comm.
- * Display name comes from the window title at observation time, NEVER
- * synced (docs/e2ee.md §3).
+ * Display name comes from the window CLASS, never the title. docs/e2ee.md
+ * §3: "window titles never leave the device in any form. This is a hard
+ * rule, not a default." "Never synced" is not sufficient protection — a
+ * title in `displayName` still reaches the UI and the on-disk app-name
+ * cache, so it is never read at all.
  */
 class HyprlandCollector(
     private val socketPath: Path = defaultSocketPath(),
@@ -107,15 +110,33 @@ class HyprlandCollector(
             // Focus left all windows (no app focused).
             return FocusChange(appKey = AppKey(""), atMs = System.currentTimeMillis(), isIdle = true)
         }
+        // `activewindow>>CLASS,TITLE`. The title is deliberately parsed and
+        // DISCARDED — see [displayNameFor].
         val parts = payload.split(",", limit = 2)
         val appClass = parts[0]
-        val title = parts.getOrNull(1)
         return FocusChange(
             appKey = resolveAppKey(appClass),
             atMs = System.currentTimeMillis(),
-            displayName = title?.takeIf { it.isNotBlank() },
+            displayName = displayNameFor(appClass),
         )
     }
+
+    /**
+     * Human-facing name for an app, derived from its WM class — NEVER the
+     * window title.
+     *
+     * `docs/e2ee.md` §3 is unambiguous: "window titles never leave the device
+     * in any form. This is a hard rule, not a default. Titles are the
+     * highest-sensitivity field Lumen touches (document names, URLs, chat
+     * partners)." `AppUsageCollector.FocusChange.displayName` repeats it.
+     *
+     * This collector previously put the title in `displayName`, where it
+     * would have reached the UI, the app-name cache on disk, and anything
+     * that later reads display names. The class is what a user recognises
+     * anyway ("firefox"), and it is already the AppKey, so nothing is lost.
+     */
+    private fun displayNameFor(appClass: String): String? =
+        appClass.trim().takeIf { it.isNotEmpty() }
 
     private fun resolveAppKey(appClass: String): AppKey {
         val normalized = appClass.trim().lowercase()
@@ -128,12 +149,13 @@ class HyprlandCollector(
             .redirectErrorStream(true).start()
             .inputStream.bufferedReader().use { it.readText() }
         // Minimal parse without a JSON lib at the seam boundary.
+        // Only `class` is read. `title` is not parsed at all here, so a
+        // window title cannot reach a FocusChange even by accident.
         val cls = Regex("\"class\"\\s*:\\s*\"([^\"]+)\"").find(out)?.groupValues?.get(1)
-        val title = Regex("\"title\"\\s*:\\s*\"([^\"]+)\"").find(out)?.groupValues?.get(1)
         FocusChange(
             appKey = resolveAppKey(cls ?: "unknown"),
             atMs = System.currentTimeMillis(),
-            displayName = title?.takeIf { it.isNotBlank() },
+            displayName = displayNameFor(cls ?: "unknown"),
         )
     }.getOrNull()
 
@@ -141,7 +163,10 @@ class HyprlandCollector(
         fun defaultSocketPath(): Path {
             val sig = System.getenv("HYPRLAND_INSTANCE_SIGNATURE")
                 ?: throw IllegalStateException("HYPRLAND_INSTANCE_SIGNATURE not set")
-            val runtime = System.getenv("XDG_RUNTIME_DIR") ?: "/run/user/${System.getProperty("user.name")}"
+            // /run/user/<uid> — the fallback used the *username*, which is
+            // never a valid path component here.
+            val runtime = System.getenv("XDG_RUNTIME_DIR")
+                ?: "/run/user/${runCatching { ProcessBuilder("id", "-u").start().inputStream.bufferedReader().readText().trim() }.getOrNull() ?: "0"}"
             return Path.of(runtime, "hypr", sig, ".socket2.sock")
         }
 
