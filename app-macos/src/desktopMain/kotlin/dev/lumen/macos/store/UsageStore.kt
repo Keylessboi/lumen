@@ -1,6 +1,8 @@
 package dev.lumen.macos.store
 
 import dev.lumen.core.clock.LocalDay
+import dev.lumen.core.collector.AppNameResolver
+import dev.lumen.macos.names.SpotlightNameResolver
 import dev.lumen.core.clock.UtcDay
 import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
@@ -32,6 +34,12 @@ import java.util.UUID
  */
 class UsageStore(
     private val root: File = defaultRoot(),
+    /**
+     * Turns app ids into human names. Platform-specific by necessity —
+     * Spotlight here, desktop entries on Linux, PackageManager on Android —
+     * behind one seam in core so the *gap* is only solved once.
+     */
+    private val nameResolver: AppNameResolver = SpotlightNameResolver(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -133,51 +141,16 @@ class UsageStore(
             .filter { it.isNotBlank() && it !in known }
             .distinct()
             .forEach { bundleId ->
-                val name = devSelfName(bundleId) ?: appNameForBundleId(bundleId)
-                name?.let { rememberName(AppKey(bundleId), it) }
+                nameResolver.resolve(AppKey(bundleId))?.let { rememberName(AppKey(bundleId), it) }
             }
     }
-
-    /**
-     * Lumen's own identity while running unpackaged.
-     *
-     * A dev build is a bare JVM, so lsappinfo reports the JDK's bundle id and
-     * the main class as the name — which is why Lumen appeared in its own
-     * list as "MainKt". The packaged .app has a real bundle id and does not
-     * hit this. Naming it here rather than special-casing the collector keeps
-     * the collector reporting what it observes.
-     */
-    private fun devSelfName(bundleId: String): String? {
-        if (!bundleId.startsWith("net.java.openjdk.java/")) return null
-        val mainClass = System.getProperty("sun.java.command")
-            ?.substringBefore(' ')
-            ?.substringAfterLast('.')
-        return if (bundleId.substringAfter('/') == mainClass) "Lumen" else null
-    }
-
-    /** Spotlight lookup: bundle id -> the app's display name, or null. */
-    private fun appNameForBundleId(bundleId: String): String? = runCatching {
-        // Quoted so a crafted id cannot alter the query's structure.
-        val query = "kMDItemCFBundleIdentifier == \"${bundleId.replace("\"", "")}\""
-        val proc = ProcessBuilder("/usr/bin/mdfind", query).redirectErrorStream(false).start()
-        val out = proc.inputStream.bufferedReader().readText()
-        if (!proc.waitFor(MDFIND_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
-            proc.destroyForcibly()
-            return null
-        }
-        out.lineSequence()
-            .firstOrNull { it.endsWith(".app") }
-            ?.substringAfterLast('/')
-            ?.removeSuffix(".app")
-            ?.takeIf { it.isNotBlank() }
-    }.getOrNull()
 
     /** Remember a human-facing app name. Display only, never synced. */
     fun rememberName(appKey: AppKey, displayName: String?) {
         // Our own dev process reports its main class ("MainKt"). Override at
         // the single point every name enters the store, so the live collector
         // and the import path cannot disagree about what Lumen is called.
-        val resolved = devSelfName(appKey.value) ?: displayName
+        val resolved = nameResolver.resolve(appKey) ?: displayName
         return rememberResolvedName(appKey, resolved)
     }
 
@@ -339,7 +312,6 @@ class UsageStore(
 
     companion object {
         private const val MILLIS_PER_DAY = 86_400_000L
-        private const val MDFIND_TIMEOUT_SECONDS = 2L
 
         fun defaultRoot(): File = File(
             System.getProperty("user.home"),

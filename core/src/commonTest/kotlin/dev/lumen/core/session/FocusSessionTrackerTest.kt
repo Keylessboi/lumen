@@ -1,4 +1,4 @@
-package dev.lumen.macos.session
+package dev.lumen.core.session
 
 import dev.lumen.core.collector.FocusChange
 import dev.lumen.core.model.AppKey
