@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- app-android — OWNER: Agent A. M3 scaffold.
+     allowBackup=false is LOCKED (docs/plan.md #10): Android auto-backup
+     would exfiltrate the local DB to Google Drive in plaintext. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Usage Access: the ONLY permission lumen needs on Android.
+         Not a runtime permission — user grants via Settings → Usage Access. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Lumen"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
