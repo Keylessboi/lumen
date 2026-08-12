@@ -40,6 +40,11 @@ class KnowledgeCImporterTest {
         name: String = "knowledgeC.db",
         withZObject: Boolean = true,
         rows: List<Triple<String, Long, Long>> = emptyList(),
+        /**
+         * Current macOS records app time under `/app/usage`; older systems
+         * used `/app/inFocus`. Both are supported, so both are tested.
+         */
+        stream: String = "/app/usage",
     ): File {
         val db = File(tmp, name)
         DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}").use { c ->
@@ -61,7 +66,7 @@ class KnowledgeCImporterTest {
                     "INSERT INTO ZOBJECT (ZSTREAMNAME, ZVALUESTRING, ZSTARTDATE, ZENDDATE) VALUES (?,?,?,?)",
                 ).use { st ->
                     rows.forEach { (bundle, startMs, endMs) ->
-                        st.setString(1, "/app/inFocus")
+                        st.setString(1, stream)
                         st.setString(2, bundle)
                         st.setDouble(3, toCocoa(startMs))
                         st.setDouble(4, toCocoa(endMs))
@@ -108,6 +113,105 @@ class KnowledgeCImporterTest {
         )
     }
 
+    // ---- stream resolution (the bug LO hit: import silently returned nothing)
+    //
+    // macOS renamed the foreground-time stream. On macOS 26 `/app/inFocus`
+    // does not exist at all and app time lives in `/app/usage`. The importer
+    // had the old name inlined in its query, so it returned Imported(empty)
+    // and the UI said "No new history to import" — indistinguishable from
+    // "you have no history", on a Mac with weeks of it.
+
+    @Test
+    fun `imports from the current macOS stream, app usage`() {
+        val db = buildStore(
+            stream = "/app/usage",
+            rows = listOf(Triple("com.apple.Safari", noonMs, noonMs + 300_000)),
+        )
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(import(db))
+        assertEquals(listOf("com.apple.Safari"), imported.events.map { it.appKey.value })
+    }
+
+    @Test
+    fun `imports from the legacy stream, app inFocus`() {
+        val db = buildStore(
+            stream = "/app/inFocus",
+            rows = listOf(Triple("com.apple.Safari", noonMs, noonMs + 300_000)),
+        )
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(import(db))
+        assertEquals(listOf("com.apple.Safari"), imported.events.map { it.appKey.value })
+    }
+
+    /**
+     * The regression guard. A well-formed ZOBJECT carrying only streams we do
+     * not know about must report [KnowledgeCImporter.Result.SchemaUnrecognised],
+     * NOT an empty successful import.
+     *
+     * The old schema check verified the table's *columns*, which are identical
+     * across macOS versions, so a renamed stream passed the guard and produced
+     * silent zeros — exactly what this class's header promises it will not do.
+     */
+    @Test
+    fun `an unknown stream name is an unrecognised schema, not an empty import`() {
+        val db = buildStore(
+            stream = "/app/somethingAppleRenamedItTo",
+            rows = listOf(Triple("com.apple.Safari", noonMs, noonMs + 300_000)),
+        )
+        assertIs<KnowledgeCImporter.Result.SchemaUnrecognised>(import(db))
+    }
+
+    // ---- the double-count guard ----
+    //
+    // Apple records the same apps Lumen records. Any period Lumen tracked
+    // itself exists twice — once live, once in the Knowledge store — so the
+    // import must stop where Lumen's own coverage begins.
+
+    @Test
+    fun `untilMs excludes sessions Lumen already tracked itself`() {
+        val db = buildStore(
+            rows = listOf(
+                Triple("com.before.lumen", noonMs, noonMs + 60_000),
+                Triple("com.during.lumen", noonMs + 300_000, noonMs + 360_000),
+            ),
+        )
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(
+            KnowledgeCImporter(device, db).import(sinceMs = 0L, untilMs = noonMs + 300_000),
+        )
+        assertEquals(
+            listOf("com.before.lumen"),
+            imported.events.map { it.appKey.value },
+            "the boundary is exclusive — a session starting exactly at it is Lumen's own",
+        )
+    }
+
+    @Test
+    fun `without untilMs everything from sinceMs is imported`() {
+        val db = buildStore(
+            rows = listOf(
+                Triple("a", noonMs, noonMs + 60_000),
+                Triple("b", noonMs + 300_000, noonMs + 360_000),
+            ),
+        )
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(import(db))
+        assertEquals(listOf("a", "b"), imported.events.map { it.appKey.value })
+    }
+
+    @Test
+    fun `startSeq continues an existing sequence rather than restarting it`() {
+        // Harmless in the NDJSON cache, fatal once app-macos moves to
+        // LumenStore: (device_id, seq) is the PK there and INSERT OR IGNORE
+        // would silently drop every colliding imported row.
+        val db = buildStore(
+            rows = listOf(
+                Triple("a", noonMs, noonMs + 1000),
+                Triple("b", noonMs + 1000, noonMs + 2000),
+            ),
+        )
+        val imported = assertIs<KnowledgeCImporter.Result.Imported>(
+            KnowledgeCImporter(device, db).import(sinceMs = 0L, startSeq = 500L),
+        )
+        assertEquals(listOf(500L, 501L), imported.events.map { it.seq })
+    }
+
     @Test
     fun `maps focus rows to events with correct epoch conversion`() {
         val db = buildStore(
@@ -130,7 +234,7 @@ class KnowledgeCImporterTest {
     }
 
     @Test
-    fun `ignores streams other than app inFocus`() {
+    fun `ignores streams other than the foreground-time stream`() {
         val db = buildStore(rows = listOf(Triple("com.apple.Safari", noonMs, noonMs + 60_000)))
         val imported = assertIs<KnowledgeCImporter.Result.Imported>(import(db))
         assertEquals(listOf("com.apple.Safari"), imported.events.map { it.appKey.value })
