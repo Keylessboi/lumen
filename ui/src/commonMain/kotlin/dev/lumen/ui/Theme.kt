@@ -59,6 +59,34 @@ object LumenTheme {
      */
     fun colorForKey(key: String): Color = CategoryPalette[paletteIndex(key)]
 
+    /**
+     * Fixed colour per category.
+     *
+     * Categories are a closed set of eight plus Uncategorized, so unlike apps
+     * they get a stable hand-assigned hue rather than a hash — the donut is
+     * the same colours in the same order every day, which is what makes it
+     * readable at a glance.
+     *
+     * Uncategorized is the neutral, deliberately: `docs/design-spec.md` says
+     * categories never use red as a "bad" state, and not-knowing is not a
+     * failure state either. It is a plain grey that recedes rather than
+     * accuses.
+     */
+    fun colorForCategory(name: String): Color = when (name) {
+        "Communication" -> CategoryPalette[1] // sky blue
+        "Development" -> CategoryPalette[2]   // bluish green
+        "Reading" -> CategoryPalette[4]       // blue
+        "Writing" -> CategoryPalette[6]       // reddish purple
+        "Browsing" -> CategoryPalette[0]      // orange
+        "Media" -> CategoryPalette[5]         // vermillion
+        "Games" -> CategoryPalette[3]         // yellow
+        "Utilities" -> CategoryPalette[7]     // light neutral
+        else -> Uncategorized                 // grey; not a judgement
+    }
+
+    /** The neutral for time Lumen cannot categorise. */
+    val Uncategorized = Color(0xFF5A6272)
+
     private fun paletteIndex(key: String): Int =
         ((key.hashCode().toLong() and 0x7fffffffL) % CategoryPalette.size).toInt()
 
