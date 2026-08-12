@@ -33,22 +33,22 @@ fi
 # Agent B = macOS + iOS.
 ZONE_A=(
   "core/src/commonMain"
-  "core/src/commonTest"
   "core/src/desktopMain"
   "core/src/androidMain"
   "transport-xmpp"
   "app-linux"
   "app-android"
-  "tools/registry-builder"
-  "tools/sync-test-server"
   "docs/design-spec.md"
   "docs/data-model.md"
-  "docs/e2ee.md"
-  "docs/providers.md"
   "docs/non-goals.md"
 )
 ZONE_B=(
+  "core/src/commonTest"
   "app-macos"
+  "tools/registry-builder"
+  "tools/sync-test-server"
+  "docs/e2ee.md"
+  "docs/providers.md"
   "docs/non-goals.md"
 )
 
