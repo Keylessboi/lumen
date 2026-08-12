@@ -54,12 +54,13 @@ fun TodayScreen(
     liveApp: String?,
     reducedMotion: Boolean,
     /**
-     * Hide the "Now: <app>" line entirely. Android passes false: the app
-     * only shows this screen while Lumen itself is foreground, so the
-     * indicator would always read "Now: Lumen" — noise, not information.
-     * (LO directive; added by Agent A, awaiting B review since ui/ is B's.)
+     * Show the "Now: <app>" line. Defaults to OFF: the live-app indicator
+     * belongs in a bar applet (waybar, macOS tray), not the Today screen —
+     * on desktop it just repeats whatever is in front of you, and on Android
+     * it always read "Now: Lumen" because viewing the app means Lumen is
+     * foreground. LO directive; ui/ is Agent B's, flagged for review.
      */
-    showLiveApp: Boolean = true,
+    showLiveApp: Boolean = false,
     historyState: HistoryState = HistoryState.Hidden,
     /**
      * Recent per-day totals for the trend view (chart 3 of the three in
