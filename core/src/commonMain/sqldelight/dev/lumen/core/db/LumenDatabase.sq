@@ -102,3 +102,25 @@ SELECT category FROM category_registry WHERE app_key = ?;
 
 selectManualOverride:
 SELECT category FROM manual_overrides WHERE app_key = ?;
+
+selectSetting:
+SELECT * FROM settings WHERE key = ?;
+
+selectWatermark:
+SELECT last_acked_seq FROM sync_watermark WHERE device_id = ?;
+
+upsertWatermark:
+INSERT OR REPLACE INTO sync_watermark(device_id, last_acked_seq)
+VALUES (?, ?);
+
+selectEventsAfter:
+SELECT * FROM events WHERE device_id = ? AND seq > ? ORDER BY seq;
+
+markEventSynced:
+UPDATE events SET sync_state = ? WHERE device_id = ? AND seq = ?;
+
+pruneEventsBefore:
+DELETE FROM events WHERE started_at_ms < ?;
+
+pruneBucketsBefore:
+DELETE FROM buckets WHERE bucket_ts < ?;
