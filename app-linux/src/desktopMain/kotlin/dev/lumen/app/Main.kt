@@ -50,6 +50,7 @@ fun main() = application {
 
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var storedTotalMs by remember { mutableStateOf(0L) }
+        var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
         var liveApp by remember { mutableStateOf<String?>(null) }
         var liveSinceMs by remember { mutableStateOf(0L) }
         var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -57,14 +58,42 @@ fun main() = application {
         fun render() {
             val today = UtcDay.today()
             val rollups = store.rollupsForDay(deviceId, today)
-            storedTotalMs = rollups.sumOf { it.totalMs }
-            totals = rollups.sortedByDescending { it.totalMs }.map { rollup ->
-                AppTotal(
-                    appKey = rollup.appKey,
-                    displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
-                    totalMs = rollup.totalMs,
-                )
+            // storedTotalMs must exclude the idle key: locked screen time is
+            // not screen time, and the UI total feeds off this.
+            storedTotalMs = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
+            totals = rollups
+                .filter { it.appKey.value.isNotBlank() }
+                .sortedByDescending { it.totalMs }
+                .map { rollup ->
+                    AppTotal(
+                        appKey = rollup.appKey,
+                        displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
+                        totalMs = rollup.totalMs,
+                    )
+                }
+        }
+
+        // The app list must tick with the live session, not freeze until the
+        // next focus change — otherwise the top total climbs every second
+        // while the rows beneath stay static.
+        fun refreshTotals(liveMs: Long) {
+            val base = totals.associate { it.appKey to it.totalMs }.toMutableMap()
+            val liveKey = liveAppKey
+            if (liveKey != null && liveMs > 0) {
+                base.merge(liveKey, liveMs, Long::plus)
             }
+            totals = base.entries
+                // AppKey("") is the idle/locked transition, not an app; it is
+                // already inside storedTotalMs + liveMs.
+                .filter { it.key.value.isNotBlank() }
+                .sortedByDescending { it.value }
+                .map { (appKey, ms) ->
+                    AppTotal(
+                        appKey = appKey,
+                        displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
+                        totalMs = ms,
+                    )
+                }
         }
 
         LaunchedEffect(Unit) {
@@ -76,6 +105,7 @@ fun main() = application {
                     day.add(closed)
                     render()
                 }
+                liveAppKey = change.appKey
                 liveApp = nameResolver.resolve(change.appKey) ?: change.appKey.value
                 liveSinceMs = change.atMs
             }
@@ -84,11 +114,15 @@ fun main() = application {
         LaunchedEffect(Unit) {
             while (true) {
                 now = System.currentTimeMillis()
+                val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
+                    (now - liveSinceMs).coerceAtLeast(0) else 0
+                refreshTotals(liveMs)
                 delay(1000)
             }
         }
 
-        val liveMs = if (liveSinceMs > 0) (now - liveSinceMs).coerceAtLeast(0) else 0
+        val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
+            (now - liveSinceMs).coerceAtLeast(0) else 0
 
         val reducedMotion = remember { reducedMotionEnabled() }
 

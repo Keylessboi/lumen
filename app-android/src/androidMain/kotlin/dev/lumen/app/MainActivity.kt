@@ -10,11 +10,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.lumen.app.collector.UsageStatsCollector
 import dev.lumen.app.names.PackageManagerNameResolver
+import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
+import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
@@ -62,10 +64,36 @@ class MainActivity : ComponentActivity() {
             val day = remember { DayAccumulator() }
 
             var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
-            var liveApp by remember { mutableStateOf<String?>(null) }
+            var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
+            var liveAppName by remember { mutableStateOf<String?>(null) }
             var liveSinceMs by remember { mutableStateOf(0L) }
             var now by remember { mutableStateOf(System.currentTimeMillis()) }
             val permission = remember { collector.permissionState() }
+
+            // The app list must tick with the live session, not freeze until
+            // the next focus change. Without this the top total climbs every
+            // second while the rows beneath stay static, which reads as a
+            // broken screen even though the data is fine.
+            fun refreshTotals(liveMs: Long) {
+                val base = day.snapshot().associate { it.first to it.second }.toMutableMap()
+                val liveKey = liveAppKey
+                if (liveKey != null && liveMs > 0) {
+                    base.merge(liveKey, liveMs, Long::plus)
+                }
+                totals = base.entries
+                    // AppKey("") is the screen-locked/idle transition, not an
+                    // app. It is already inside totalMs; surfacing it as the
+                    // largest row would present "lock screen" as an app.
+                    .filter { it.key.value.isNotBlank() }
+                    .sortedByDescending { it.value }
+                    .map { (appKey, ms) ->
+                        AppTotal(
+                            appKey = appKey,
+                            displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
+                            totalMs = ms,
+                        )
+                    }
+            }
 
             LaunchedEffect(permission) {
                 // Without Usage Access there is nothing to collect. Say so in
@@ -74,19 +102,35 @@ class MainActivity : ComponentActivity() {
                 // idle user.
                 if (permission !is PermissionState.Granted) return@LaunchedEffect
 
+                // Android retains usage events for ~3 days (the collector's
+                // backfillHorizonMs). The live stream only sees events from
+                // this point on, so without a backfill the Today screen would
+                // start at zero every launch even though the user has been
+                // using the phone for hours. UsageStatsManager is the same
+                // backend Digital Wellbeing reads — this is how the app shows
+                // the real day.
+                val zone = LocalDay.zoneOf(null)
+                val today = LocalDay.today(zone)
+                val sinceMs = LocalDay.startOfDayMs(today, zone)
+                collector.backfill(sinceMs).forEach { change ->
+                    day.remember(change)
+                    tracker.onChange(change)?.let { closed ->
+                        day.add(closed)
+                    }
+                    liveAppKey = change.appKey
+                    liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
+                    liveSinceMs = change.atMs
+                }
+                refreshTotals(0)
+
                 collector.focusChanges().collect { change ->
                     day.remember(change)
                     tracker.onChange(change)?.let { closed ->
                         day.add(closed)
-                        totals = day.snapshot().map { (appKey, ms) ->
-                            AppTotal(
-                                appKey = appKey,
-                                displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
-                                totalMs = ms,
-                            )
-                        }
+                        refreshTotals(0)
                     }
-                    liveApp = nameResolver.resolve(change.appKey) ?: change.appKey.value
+                    liveAppKey = change.appKey
+                    liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
                     liveSinceMs = change.atMs
                 }
             }
@@ -94,16 +138,28 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 while (true) {
                     now = System.currentTimeMillis()
+                    val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
+                        (now - liveSinceMs).coerceAtLeast(0) else 0
+                    refreshTotals(liveMs)
                     delay(1000)
                 }
             }
 
-            val liveMs = if (liveSinceMs > 0) (now - liveSinceMs).coerceAtLeast(0) else 0
+            // The visible total must exclude the idle key (AppKey("")) — the
+            // screen-locked sessions. They are needed internally to close the
+            // previous app's session, but they are not screen time: a phone
+            // locked from 2am to 11am would otherwise show an 9-hour "day".
+            fun visibleTotalMs(): Long =
+                day.snapshot().filter { it.first.value.isNotBlank() }.sumOf { it.second }
+
+            val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
+                (now - liveSinceMs).coerceAtLeast(0) else 0
 
             TodayScreen(
                 totals = totals,
-                totalMs = day.totalMs() + liveMs,
-                liveApp = liveApp,
+                totalMs = visibleTotalMs() + liveMs,
+                liveApp = null,
+                showLiveApp = false,
                 reducedMotion = remember { reducedMotionEnabled() },
                 historyState = when (permission) {
                     is PermissionState.Granted -> HistoryState.Hidden
