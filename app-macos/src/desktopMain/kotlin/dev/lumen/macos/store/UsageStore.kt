@@ -3,9 +3,11 @@ package dev.lumen.macos.store
 import dev.lumen.core.clock.LocalDay
 import dev.lumen.macos.collector.MacSystemUi
 import dev.lumen.core.export.ExportPayload
+import dev.lumen.core.export.ExportedDeviceKey
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.Setting
 import dev.lumen.core.collector.AppNameResolver
+import dev.lumen.macos.keychain.MacosKeychain
 import dev.lumen.macos.names.SpotlightNameResolver
 import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
@@ -59,6 +61,12 @@ class UsageStore(
      * other data; injectable so a test can hand in an in-memory one.
      */
     private val store: LumenStore = JvmLumenStore.open(File(root, DB_NAME)),
+    /**
+     * The device's sync identity, for an export to carry. Lazy by
+     * construction — nothing here touches the login keychain until an export
+     * actually asks for a key.
+     */
+    private val keychain: MacosKeychain = MacosKeychain(),
 ) {
 
     // Everything the init block touches is declared ABOVE it. A `by lazy`
@@ -254,9 +262,11 @@ class UsageStore(
      * events ARE the record here. When the rollup tables are populated the
      * source changes and the shape does not.
      *
-     * deviceKeys is empty: macOS has no keychain yet, so there is no sync
-     * identity to carry. An empty list is the honest answer; inventing a
-     * placeholder key would make a restore look complete when it is not.
+     * deviceKeys carries this device's X25519 identity from the login
+     * keychain, so a restore resumes as the same device rather than joining
+     * as a stranger. When the keychain cannot be reached it stays EMPTY
+     * rather than carrying an invented key: an empty list makes a restore
+     * visibly incomplete, a placeholder makes it look complete and is not.
      */
     fun exportPayload(zone: TimeZone = displayZone()): ExportPayload {
         val rollups = recordedDays(zone).flatMap { day ->
@@ -280,8 +290,33 @@ class UsageStore(
                     deviceId = deviceId(),
                 )
             }
-        return ExportPayload(rollups = rollups, settings = settings)
+        return ExportPayload(
+            rollups = rollups,
+            settings = settings,
+            deviceKeys = keychain.deviceKeyPairOrNull()?.let { keys ->
+                listOf(
+                    ExportedDeviceKey(
+                        deviceId = device,
+                        displayName = deviceDisplayName(),
+                        publicKey = keys.publicKey,
+                        privateKey = keys.privateKeyHandle,
+                    ),
+                )
+            } ?: emptyList(),
+        )
     }
+
+    /**
+     * What this Mac is called, for a restore screen to name the device a
+     * backup came from. Falls back rather than failing: a backup must not
+     * depend on a subprocess answering.
+     */
+    private fun deviceDisplayName(): String = runCatching {
+        val process = ProcessBuilder("/usr/sbin/scutil", "--get", "ComputerName").start()
+        val name = process.inputStream.bufferedReader().readText().trim()
+        process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+        name.takeIf { it.isNotBlank() }
+    }.getOrNull() ?: "This Mac"
 
     /** Remember a human-facing app name. Display only, never synced. */
     fun rememberName(appKey: AppKey, displayName: String?) {
