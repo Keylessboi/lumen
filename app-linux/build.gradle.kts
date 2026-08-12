@@ -18,11 +18,15 @@ kotlin {
             dependencies {
                 implementation(project(":core"))
                 implementation(project(":ui"))
+                implementation(project(":transport-xmpp"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.kotlinx.datetime)
+                // X25519 keypair generation for LinuxKeychain (M4 E2EE).
+                implementation(libs.bouncycastle)
             }
         }
         val desktopTest by getting {

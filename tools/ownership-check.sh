@@ -34,6 +34,7 @@ fi
 ZONE_A=(
   "core/src/commonMain"
   "core/src/desktopMain"
+  "core/src/desktopTest"
   "core/src/androidMain"
   "transport-xmpp"
   "app-linux"
@@ -72,6 +73,11 @@ SHARED=(
   "LICENSE"
   ".gitignore"
   "docs"
+  # Generated from tools/registry-builder (Agent B's curation source) —
+  # a generated file has no independent authorship, so it ships with its
+  # source rather than forcing the curation PR to carry a core/ file it
+  # cannot own (agreed with B, M4 discussion).
+  "core/src/commonMain/kotlin/dev/lumen/core/category/GeneratedRegistry.kt"
 )
 
 # Module-level build files are shared infra too (they configure targets for
@@ -96,7 +102,9 @@ in_zone() {
   return 1
 }
 
-changed=$(git diff --name-only "${BASE}...${HEAD}")
+# Only files present in the head (added/copied/modified/renamed): a deletion
+# is a path leaving the tree, so moves between zones don't false-positive.
+changed=$(git diff --name-only --diff-filter=ACMRT "${BASE}...${HEAD}")
 violations=()
 
 while IFS= read -r file; do

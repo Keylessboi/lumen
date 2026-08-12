@@ -1,0 +1,30 @@
+[Unit]
+# Lumen headless tracker — records screen time without the window.
+# The window app and this service share the same SQLite store, so running
+# both at once is fine: closing the window hides the report, the service
+# keeps measuring.
+#
+# Uses the plain-JVM launcher (bin/lumen-tracker.sh), NOT the Compose
+# binary: the Compose launcher initialises AWT/Skiko and aborts under a
+# headless unit with __cxa_pure_virtual.
+#
+# Install:
+#   cp lumen-tracker.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now lumen-tracker.service
+#
+# Adjust the ExecStart path to your install location.
+
+[Service]
+Type=simple
+ExecStart=/home/travis/Projects/lumen/app-linux/build/compose/binaries/main/app/lumen/bin/lumen-tracker.sh
+Restart=on-failure
+RestartSec=5
+
+# The tracker needs the Hyprland session environment (the compositor socket
+# path). A user service inherits the graphical session env when started via
+# systemctl --user; if the socket is missing, the collector reports
+# Unsupported and the service logs it.
+
+[Install]
+WantedBy=default.target

@@ -1,7 +1,7 @@
 package dev.lumen.core.store
 
-import app.cash.sqldelight.Query
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import android.content.Context
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.db.LumenDatabase
 import dev.lumen.core.model.AppDayRollup
@@ -12,17 +12,21 @@ import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.MinuteBucket
 import dev.lumen.core.model.Setting
-import java.io.File
 
 /**
- * JVM desktop driver for [LumenStore] — Agent A, M1.
+ * Android driver for [LumenStore] — Agent A, M3.
  *
- * Binds the frozen seam to the SQLDelight-generated [LumenDatabase]
- * (schema normative in docs/data-model.md, source in
- * core/src/commonMain/sqldelight). The schema is FROZEN at M1; this
- * class only reads/writes it, never changes it.
+ * Mirrors [JvmLumenStore]'s query mapping against the SQLDelight-generated
+ * [LumenDatabase] (schema FROZEN at M1, source in
+ * `core/src/commonMain/sqldelight`). The schema is identical on both
+ * platforms — only the driver differs, so an export written on desktop
+ * opens on Android and vice versa.
+ *
+ * `AndroidSqliteDriver` handles create/migrate from the schema version
+ * itself, so [open] is far simpler than the JVM driver's manual
+ * `PRAGMA user_version` dance (see JvmLumenStore.open for why that exists).
  */
-class JvmLumenStore private constructor(
+class AndroidLumenStore private constructor(
     private val db: LumenDatabase,
     private val queries: dev.lumen.core.db.LumenDatabaseQueries,
 ) : LumenStore {
@@ -183,22 +187,6 @@ class JvmLumenStore private constructor(
     override fun lastAckedSeq(deviceId: DeviceId): Long =
         queries.selectWatermark(deviceId.value).executeAsOneOrNull() ?: 0L
 
-    /**
-     * The highest event seq stored for [deviceId], or -1 when none exist.
-     *
-     * `FocusSessionTracker` numbers from 0 on every launch; without this,
-     * a restart writes seqs 0,1,2... that collide with the existing
-     * `(device_id, seq)` PK and are silently dropped by `INSERT OR IGNORE` —
-     * the day stops growing with no error. Seeding the tracker's nextSeq
-     * from here is the single point where the monotonic counter is owned.
-     */
-    fun lastEventSeq(deviceId: DeviceId): Long =
-        queries.selectEventsAfter(deviceId.value, Long.MIN_VALUE)
-            .executeAsList()
-            .lastOrNull()
-            ?.seq
-            ?: -1L
-
     override fun setAckedSeq(deviceId: DeviceId, seq: Long) {
         queries.upsertWatermark(deviceId.value, seq)
     }
@@ -262,63 +250,20 @@ class JvmLumenStore private constructor(
 
     companion object {
         /**
-         * Open (or create) the database at [dbFile].
-         *
-         * Creates the schema only on a fresh database and migrates an older
-         * one. Calling `Schema.create` unconditionally — as this did —
-         * succeeds exactly once and then throws `table devices already
-         * exists` on every subsequent launch, because SQLDelight emits plain
-         * `CREATE TABLE`. Nothing caught it: the contract tests and the
-         * driver's own round-trips all use [inMemory], which is fresh every
-         * time, and no app persisted through this seam yet.
-         *
-         * `user_version` is SQLite's own schema-version pragma and is what
-         * SQLDelight's migration machinery expects to drive.
+         * Open (or create) the app database. [AndroidSqliteDriver] derives
+         * the schema version from [LumenDatabase.Schema] and runs
+         * create/migrate itself — no manual PRAGMA handling needed.
          */
-        fun open(dbFile: File): JvmLumenStore {
-            dbFile.parentFile?.mkdirs()
-            val driver = JdbcSqliteDriver(
-                url = "jdbc:sqlite:${dbFile.absolutePath}",
+        fun open(context: Context): AndroidLumenStore {
+            val driver = AndroidSqliteDriver(
+                schema = LumenDatabase.Schema,
+                context = context,
+                name = DB_NAME,
             )
-            val current = driver.executeQuery(
-                identifier = null,
-                sql = "PRAGMA user_version",
-                mapper = { cursor ->
-                    app.cash.sqldelight.db.QueryResult.Value(
-                        if (cursor.next().value) cursor.getLong(0) ?: 0L else 0L,
-                    )
-                },
-                parameters = 0,
-            ).value
-
-            val target = LumenDatabase.Schema.version
-            when {
-                current == 0L -> {
-                    LumenDatabase.Schema.create(driver).value
-                    driver.execute(null, "PRAGMA user_version = $target", 0)
-                }
-                current < target -> {
-                    LumenDatabase.Schema.migrate(driver, current, target).value
-                    driver.execute(null, "PRAGMA user_version = $target", 0)
-                }
-                // current > target: a newer Lumen wrote this file. Opening it
-                // read-write would corrupt data the older schema cannot
-                // represent, so refuse rather than guess.
-                current > target -> error(
-                    "database schema v$current is newer than this build understands (v$target)",
-                )
-            }
-
             val db = LumenDatabase(driver)
-            return JvmLumenStore(db, db.lumenDatabaseQueries)
+            return AndroidLumenStore(db, db.lumenDatabaseQueries)
         }
 
-        /** In-memory database for tests. */
-        fun inMemory(): JvmLumenStore {
-            val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-            LumenDatabase.Schema.create(driver)
-            val db = LumenDatabase(driver)
-            return JvmLumenStore(db, db.lumenDatabaseQueries)
-        }
+        private const val DB_NAME = "lumen.db"
     }
 }

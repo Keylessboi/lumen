@@ -40,7 +40,9 @@ import java.io.File
  * derives durations; [RollupEngine] buckets and rolls them up; the store
  * survives restarts.
  */
-fun main() = application {
+fun main(args: Array<String>) = runApp()
+
+private fun runApp() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Lumen",
@@ -50,11 +52,16 @@ fun main() = application {
         val nameResolver: AppNameResolver = remember { DesktopEntryNameResolver() }
         val store = remember { openStore() }
         val deviceId = remember { resolveDeviceId(store) }
-        val tracker = remember { FocusSessionTracker(deviceId) }
+        // Seed the seq counter from the store: FocusSessionTracker numbers
+        // from 0 on every launch, and the (device_id, seq) PK drops colliding
+        // inserts silently (INSERT OR IGNORE). Without this a restart makes
+        // the day stop growing with no error.
+        val tracker = remember { FocusSessionTracker(deviceId, store.lastEventSeq(deviceId) + 1) }
         val day = remember { DayAccumulator() }
 
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var storedTotalMs by remember { mutableStateOf(0L) }
+        var storedTotals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
         var liveApp by remember { mutableStateOf<String?>(null) }
         var liveSinceMs by remember { mutableStateOf(0L) }
@@ -114,15 +121,19 @@ fun main() = application {
                         totalMs = rollup.totalMs,
                     )
                 }
+            storedTotals = totals
             totals = decorate(totals)
             categories = slices(totals)
         }
 
         // The app list must tick with the live session, not freeze until the
         // next focus change — otherwise the top total climbs every second
-        // while the rows beneath stay static.
+        // while the rows beneath stay static. The base MUST come from the
+        // stored rollups, never from `totals` (which already carries the
+        // previous live merge — re-merging on top of it compounds the live
+        // time quadratically and inflates the day).
         fun refreshTotals(liveMs: Long) {
-            val base = totals.associate { it.appKey to it.totalMs }.toMutableMap()
+            val base = storedTotals.associate { it.appKey to it.totalMs }.toMutableMap()
             val liveKey = liveAppKey
             if (liveKey != null && liveMs > 0) {
                 base.merge(liveKey, liveMs, Long::plus)
@@ -159,9 +170,43 @@ fun main() = application {
             }
         }
 
+        // Periodic sync (M4): same loop as the headless tracker, so the
+        // windowed app also pushes/pulls when an account is configured.
+        // 'Sync additive, never a dependency' — unconfigured = no loop.
         LaunchedEffect(Unit) {
+            val syncManager = SyncManager(store, deviceId)
+            while (true) {
+                delay(SYNC_INTERVAL_MS)
+                if (!syncManager.isConfigured()) continue
+                runCatching {
+                    val report = syncManager.syncOnce()
+                    if (report.integrityWarnings.isNotEmpty()) {
+                        println("lumen: sync integrity warnings: ${report.integrityWarnings}")
+                    }
+                }.onFailure { e ->
+                    println("lumen: sync failed: ${e.message}")
+                }
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            var lastDay = UtcDay.today()
             while (true) {
                 now = System.currentTimeMillis()
+                val today = UtcDay.today()
+                // UTC midnight rollover: the cached render (and its stored
+                // rollup totals) belong to yesterday. Without this the UI
+                // keeps showing yesterday's day until the next focus change,
+                // which for an app left open overnight is all morning.
+                if (today != lastDay) {
+                    lastDay = today
+                    day.clear()
+                    render()
+                    loadHistory()
+                    liveSinceMs = 0L
+                    liveAppKey = null
+                    liveApp = null
+                }
                 val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
                     (now - liveSinceMs).coerceAtLeast(0) else 0
                 refreshTotals(liveMs)
@@ -212,10 +257,11 @@ fun main() = application {
     }
 }
 
+private const val SYNC_INTERVAL_MS = 5L * 60 * 1000 // every 5 minutes, matching the headless tracker
+
 private fun openStore(): JvmLumenStore {
     val dataDir = File(System.getProperty("user.home"), ".local/share/lumen")
-    return JvmLumenStore.open(File(dataDir, "lumen.db"))
-}
+    return JvmLumenStore.open(File(dataDir, "lumen.db"))}
 
 private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
     val existing = store.setting("device_id")
@@ -230,6 +276,10 @@ private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
             deviceId = id,
         ),
     )
+    // A fresh device has nothing acked — the watermark must be -1, not the
+    // store's 0 default, or the first event (seq 0) is excluded from the
+    // outbox by `eventsAfter(seq > watermark)` and never syncs.
+    store.setAckedSeq(id, -1)
     return id
 }
 
