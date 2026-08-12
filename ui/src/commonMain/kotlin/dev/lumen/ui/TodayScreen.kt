@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -154,24 +155,42 @@ fun TodayScreen(
             // rows distinguishable on a platform with no category engine
             // wired up yet, where every category would otherwise be null.
             val fallback = LumenTheme.colorsFor(totals.map { it.appKey.value })
-            // weight(1f) with an internal scroll: the list takes the space
-            // between the strip and the chart and scrolls within it. A
-            // fill = false version sized itself to the leftover space and cut
-            // the last row in half, which reads as a rendering fault.
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                items(totals, key = { it.appKey.value }) { row ->
-                    AppRow(
-                        row = row,
-                        fraction = row.totalMs.toFloat() / max.toFloat(),
-                        color = row.category
-                            ?.let { LumenTheme.colorForCategory(it) }
-                            ?: fallback[row.appKey.value]
-                            ?: LumenTheme.colorForKey(row.appKey.value),
-                        reducedMotion = reducedMotion,
-                    )
+            // The list takes a share of the leftover height and scrolls
+            // inside it — but only ever a WHOLE number of rows. Sized to the
+            // raw leftover it ends mid-row, and a row sliced through its own
+            // text reads as a rendering fault rather than as "there is more
+            // below".
+            Box(Modifier.weight(1f)) {
+                BoxWithConstraints {
+                    val visibleRows = visibleRowCount(maxHeight)
+                    // Deliberately UNKEYED. `items(totals, key = { it.appKey.value })`
+                    // is the reflex, and it is wrong for this list: a keyed lazy
+                    // list anchors the viewport to whichever KEY was first
+                    // visible, and this list is sorted by time, so its order
+                    // changes all day. The app that led at breakfast keeps the
+                    // top slot as it is overtaken, dragging the viewport down
+                    // with it — on this Mac the screen showed "Lumen 13m,
+                    // Messages 2m" while the strip above it read "Browsing
+                    // 2h 19m, Development 2h 2m", with Chrome and Terminal
+                    // scrolled out of sight and nothing saying so. Unkeyed,
+                    // identity is the RANK, which is what the viewport should
+                    // follow: the top of the list is the largest app, always.
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(ROW_GAP),
+                        modifier = Modifier.height(ROW_PITCH * visibleRows - ROW_GAP),
+                    ) {
+                        items(totals) { row ->
+                            AppRow(
+                                row = row,
+                                fraction = row.totalMs.toFloat() / max.toFloat(),
+                                color = row.category
+                                    ?.let { LumenTheme.colorForCategory(it) }
+                                    ?: fallback[row.appKey.value]
+                                    ?: LumenTheme.colorForKey(row.appKey.value),
+                                reducedMotion = reducedMotion,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -181,20 +200,49 @@ fun TodayScreen(
         // Trend view last: today is what the screen is for, history is
         // context underneath it. Absent when there is none to show, so a
         // fresh install has no empty frame.
+        //
+        // The chart takes a SHARE of the leftover height rather than a fixed
+        // 168.dp of bars. Fixed, it was first in the queue for space it did
+        // not have to justify: with the history banner up at the default
+        // window size the app list was starved to zero height — the APPS
+        // heading with nothing under it — and the chart still overflowed, so
+        // its own axis labels fell off the bottom edge. Sharing means both
+        // sections get smaller together and neither disappears, at any window
+        // size. 2:1 keeps roughly the proportions the fixed height had.
         if (recentDays.isNotEmpty()) {
             Spacer(Modifier.height(24.dp))
             DayBarsSection(
                 title = "RECENT DAYS",
                 days = recentDays,
+                modifier = Modifier.weight(2f),
                 averageMs = averageMs,
                 selectedDay = selectedDay,
                 detail = dayDetail,
                 onSelectDay = onSelectDay,
                 onClearSelection = onClearDaySelection,
+                fillHeight = true,
             )
         }
     }
 }
+
+/** One app row's height, and the gap under it. The list is sized in whole
+ *  multiples of the two so it never ends part-way through a row. */
+private val ROW_HEIGHT = 38.dp
+private val ROW_GAP = 2.dp
+private val ROW_PITCH = ROW_HEIGHT + ROW_GAP
+
+/**
+ * How many whole app rows fit in [available].
+ *
+ * Never zero: a section headed APPS with nothing under it reads as "no apps",
+ * which is a different and false statement. One clipped row is worse than one
+ * whole row, and both are better than none.
+ */
+internal fun visibleRowCount(
+    available: androidx.compose.ui.unit.Dp,
+    pitch: androidx.compose.ui.unit.Dp = ROW_PITCH,
+): Int = (available / pitch).toInt().coerceAtLeast(1)
 
 /** Section heading. One definition so every section matches exactly. */
 @Composable
@@ -225,7 +273,7 @@ private fun AppRow(
     )
 
     Row(
-        Modifier.fillMaxWidth().height(38.dp),
+        Modifier.fillMaxWidth().height(ROW_HEIGHT),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

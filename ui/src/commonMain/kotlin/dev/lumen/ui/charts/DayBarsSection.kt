@@ -54,6 +54,8 @@ fun DayBarsSection(
     detail: DayDetail? = null,
     onSelectDay: (String) -> Unit = {},
     onClearSelection: () -> Unit = {},
+    /** Size the bars to the height [modifier] allots. See [DayBars]. */
+    fillHeight: Boolean = false,
 ) {
     if (days.isEmpty()) return
 
@@ -108,9 +110,11 @@ fun DayBarsSection(
 
         DayBars(
             days = days,
+            modifier = if (fillHeight) Modifier.weight(1f) else Modifier,
             averageMs = averageMs,
             selectedDay = selectedDay,
             onSelectDay = onSelectDay,
+            fillHeight = fillHeight,
         )
 
 
