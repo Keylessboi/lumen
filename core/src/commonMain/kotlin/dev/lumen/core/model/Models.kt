@@ -94,6 +94,27 @@ data class Setting(
 )
 
 /**
+ * A day's total for one app, in the user's own day (discussion #29).
+ *
+ * The display counterpart to [AppDayRollup]: same numbers, different day
+ * boundary. [dayLocal] is a `YYYY-MM-DD` day in the `display.timezone`
+ * setting's zone, and [utcOffsetMin] records the offset that was in force
+ * when it was written, so a day stays explainable after the user relocates.
+ *
+ * Derived, per-device, never synced — devices exchange raw events and each
+ * derives its own views.
+ */
+@Serializable
+data class AppLocalDayRollup(
+    val deviceId: DeviceId,
+    val dayLocal: String,
+    val appKey: AppKey,
+    val totalMs: Long,
+    val utcOffsetMin: Int,
+    val category: String? = null,
+)
+
+/**
  * Sync record envelope — what actually travels over the wire.
  * [deviceId]+[seq] make the record globally unique; dedupe on receipt.
  */

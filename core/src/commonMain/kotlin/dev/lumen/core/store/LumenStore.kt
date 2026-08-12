@@ -2,6 +2,7 @@ package dev.lumen.core.store
 
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.model.AppLocalDayRollup
 import dev.lumen.core.model.ControlState
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
@@ -41,6 +42,26 @@ interface LumenStore {
     fun upsertRollup(rollup: AppDayRollup)
 
     fun rollupsForDay(deviceId: DeviceId, dayUtc: String): List<AppDayRollup>
+
+    // ---- local-day rollups (display; discussion #29) ----
+
+    /**
+     * Write a day's total for one app in the user's own day.
+     *
+     * Separate from [upsertRollup] because the two answer different
+     * questions: [AppDayRollup] is what devices agree on, this is what the
+     * user sees. Only the UTC one is ever synced.
+     */
+    fun upsertLocalRollup(rollup: AppLocalDayRollup)
+
+    fun localRollupsForDay(deviceId: DeviceId, dayLocal: String): List<AppLocalDayRollup>
+
+    /**
+     * Drop a local day so it can be re-derived — needed when the
+     * `display.timezone` setting changes and previously written days no
+     * longer line up with the new boundary.
+     */
+    fun clearLocalRollups(deviceId: DeviceId, dayLocal: String)
 
     // ---- settings (LWW + UTC-day) ----
 

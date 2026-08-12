@@ -1,6 +1,8 @@
 package dev.lumen.macos.store
 
+import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.clock.UtcDay
+import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
 import dev.lumen.ui.AppTotal
 import dev.lumen.ui.charts.DayTotal
@@ -139,12 +141,48 @@ class UsageStore(
      * Reads the day's file plus the previous day's, because a session that
      * started before midnight contributes buckets to today.
      */
-    fun totalsFor(dayUtc: String): List<AppTotal> {
-        val events = readEvents(dayUtc) + readEvents(previousDay(dayUtc))
+    /**
+     * The display timezone: the zone whose midnight defines a Lumen day.
+     *
+     * Stored rather than read from the OS so that every device agrees on the
+     * boundary — see `LocalDay` and discussion #29. Defaults to this Mac's
+     * zone on first run.
+     */
+    fun displayZone(): TimeZone =
+        LocalDay.zoneOf(File(root, "display-timezone").takeIf { it.exists() }?.readText()?.trim())
+
+    fun setDisplayZone(zoneId: String) {
+        File(root, "display-timezone").writeText(zoneId)
+    }
+
+    /**
+     * Per-app totals for a LOCAL day — the day the user actually lived.
+     *
+     * Events are filed by the UTC day they started in, and a local day
+     * straddles at most two of those, so both are read and then filtered by
+     * the local-day window. Bucketing to the minute first means an event
+     * spanning local midnight is split across the two days rather than
+     * assigned wholesale to one, which is the same rule the UTC path used.
+     */
+    fun totalsFor(dayLocal: String, zone: TimeZone = displayZone()): List<AppTotal> {
+        val startMs = LocalDay.startOfDayMs(dayLocal, zone)
+        val endMs = LocalDay.endOfDayMs(dayLocal, zone)
+
+        // Events are filed by the UTC day they STARTED in, and a session can
+        // run past midnight — so a day's usage can live in a file named for
+        // the day before it. Read one extra UTC day back, or a session that
+        // began at 23:58 and ran into this day is invisible.
+        val utcDays = linkedSetOf(
+            UtcDay.dayOf(startMs - 86_400_000L),
+            UtcDay.dayOf(startMs),
+            UtcDay.dayOf(endMs - 1),
+        )
+        val events = utcDays.flatMap { readEvents(it) }
+
         val byApp = mutableMapOf<String, Long>()
         for (e in events) {
             for (b in RollupEngine.bucket(e)) {
-                if (UtcDay.dayOf(b.bucketTs) != dayUtc) continue
+                if (b.bucketTs < startMs || b.bucketTs >= endMs) continue
                 byApp.merge(b.appKey.value, b.activeMs, Long::plus)
             }
         }
@@ -154,21 +192,36 @@ class UsageStore(
             .sortedByDescending { it.totalMs }
     }
 
+    /** Epoch millis of local midnight starting [dayLocal]. */
+    fun startOfDayMs(dayLocal: String, zone: TimeZone = displayZone()): Long =
+        LocalDay.startOfDayMs(dayLocal, zone)
+
+    /** The local day containing [epochMs]. */
+    fun dayOf(epochMs: Long, zone: TimeZone = displayZone()): String = LocalDay.dayOf(epochMs, zone)
+
+    /** The local day containing "now". */
+    fun today(zone: TimeZone = displayZone()): String = LocalDay.today(zone)
+
     /**
-     * Per-day totals for the [days] UTC days ending today, oldest first.
+     * Per-day totals for the [days] local days ending today, oldest first.
      *
      * Every day in the window is returned, including ones with nothing
-     * recorded — a gap in the data must render as an empty day rather than
-     * silently shortening the chart, which would misrepresent the period.
+     * recorded — a gap must render as an empty day rather than silently
+     * shortening the chart and misrepresenting the period.
      */
-    fun dailyTotals(days: Int): List<DayTotal> {
-        val today = UtcDay.today()
-        val todayStart = UtcDay.boundary(today)
-        return (days - 1 downTo 0).map { back ->
-            val dayStart = todayStart - back * MILLIS_PER_DAY
-            val dayUtc = UtcDay.dayOf(dayStart)
-            val total = totalsFor(dayUtc).sumOf { it.totalMs }
-            DayTotal(dayUtc = dayUtc, totalMs = total, isToday = dayUtc == today)
+    fun dailyTotals(days: Int, zone: TimeZone = displayZone()): List<DayTotal> {
+        val today = LocalDay.today(zone)
+        val todayStart = LocalDay.startOfDayMs(today, zone)
+        // Walk back by calendar date, not by subtracting 24h: DST days are 23
+        // or 25 hours long and fixed arithmetic drifts across one.
+        val windowStart = LocalDay.startOfDayMs(today, zone) - (days.toLong() + 1) * 86_400_000L
+        val allDays = LocalDay.daysBetween(windowStart, todayStart, zone).takeLast(days)
+        return allDays.map { day ->
+            DayTotal(
+                dayUtc = day,
+                totalMs = totalsFor(day, zone).sumOf { it.totalMs },
+                isToday = day == today,
+            )
         }
     }
 
@@ -181,9 +234,6 @@ class UsageStore(
             runCatching { json.decodeFromString(FocusEvent.serializer(), line) }.getOrNull()
         }
     }
-
-    private fun previousDay(dayUtc: String): String =
-        UtcDay.dayOf(UtcDay.boundary(dayUtc) - 1L)
 
     companion object {
         private const val MILLIS_PER_DAY = 86_400_000L

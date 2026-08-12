@@ -1,6 +1,8 @@
 package dev.lumen.macos.store
 
+import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.clock.UtcDay
+import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
@@ -80,13 +82,60 @@ class UsageStoreTest {
      * wholly to the day it started in.
      */
     @Test
-    fun `a session spanning UTC midnight splits across both days`() {
-        val midnight = UtcDay.boundary("2026-03-06")
-        // Starts 2 minutes before midnight, runs 4 minutes.
+    fun `a session spanning LOCAL midnight splits across both days`() {
+        // The boundary is the user's midnight, not UTC's (discussion #29).
+        // Under a fixed UTC zone the two coincide, which is what makes this
+        // assertion identical in shape to the one it replaces.
+        val zone = TimeZone.UTC
+        val midnight = LocalDay.startOfDayMs("2026-03-06", zone)
         store.append(event("com.apple.Safari", midnight - 120_000, 240_000))
 
-        assertEquals(120_000, store.totalsFor("2026-03-05").single().totalMs)
-        assertEquals(120_000, store.totalsFor("2026-03-06").single().totalMs)
+        assertEquals(120_000, store.totalsFor("2026-03-05", zone).single().totalMs)
+        assertEquals(120_000, store.totalsFor("2026-03-06", zone).single().totalMs)
+    }
+
+    /**
+     * The bug LO reported: at 23:50 in New York it is already tomorrow in
+     * UTC, so a UTC-day screen showed a day the user had not started living
+     * and hid the one they had.
+     */
+    @Test
+    fun `late-evening usage belongs to the local day, not the UTC one`() {
+        val newYork = TimeZone.of("America/New_York")
+        // 2026-08-12T03:50Z = Tue 11 Aug, 23:50 in New York.
+        val lateTuesday = 1_786_506_600_000L
+        store.append(event("com.apple.Safari", lateTuesday, 600_000))
+
+        assertEquals("2026-08-12", UtcDay.dayOf(lateTuesday))
+        assertEquals(600_000, store.totalsFor("2026-08-11", newYork).single().totalMs)
+        assertEquals(emptyList(), store.totalsFor("2026-08-12", newYork))
+    }
+
+    @Test
+    fun `a session spanning local midnight is split at the local boundary`() {
+        val newYork = TimeZone.of("America/New_York")
+        val localMidnight = LocalDay.startOfDayMs("2026-08-12", newYork)
+        store.append(event("com.apple.Safari", localMidnight - 120_000, 240_000))
+
+        assertEquals(120_000, store.totalsFor("2026-08-11", newYork).single().totalMs)
+        assertEquals(120_000, store.totalsFor("2026-08-12", newYork).single().totalMs)
+    }
+
+    @Test
+    fun `the display zone is stored and honoured`() {
+        store.setDisplayZone("Australia/Sydney")
+        assertEquals(TimeZone.of("Australia/Sydney"), store.displayZone())
+    }
+
+    @Test
+    fun `the trend window returns one entry per local day, newest last`() {
+        val zone = TimeZone.UTC
+        store.setDisplayZone("UTC")
+        val days = store.dailyTotals(7, zone)
+        assertEquals(7, days.size)
+        assertEquals(days.map { it.dayUtc }.sorted(), days.map { it.dayUtc })
+        assertTrue(days.last().isToday, "the newest entry is today")
+        assertEquals(1, days.count { it.isToday })
     }
 
     @Test

@@ -6,6 +6,7 @@ import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.db.LumenDatabase
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.model.AppLocalDayRollup
 import dev.lumen.core.model.ControlState
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
@@ -114,6 +115,35 @@ class JvmLumenStore private constructor(
                     category = row.category,
                 )
             }
+
+    override fun upsertLocalRollup(rollup: AppLocalDayRollup) {
+        queries.upsertLocalRollup(
+            device_id = rollup.deviceId.value,
+            day_local = rollup.dayLocal,
+            app_key = rollup.appKey.value,
+            total_ms = rollup.totalMs,
+            utc_offset_min = rollup.utcOffsetMin.toLong(),
+            category = rollup.category,
+        )
+    }
+
+    override fun localRollupsForDay(deviceId: DeviceId, dayLocal: String): List<AppLocalDayRollup> =
+        queries.selectLocalRollups(deviceId.value, dayLocal)
+            .executeAsList()
+            .map { row ->
+                AppLocalDayRollup(
+                    deviceId = DeviceId(row.device_id),
+                    dayLocal = row.day_local,
+                    appKey = AppKey(row.app_key),
+                    totalMs = row.total_ms,
+                    utcOffsetMin = row.utc_offset_min.toInt(),
+                    category = row.category,
+                )
+            }
+
+    override fun clearLocalRollups(deviceId: DeviceId, dayLocal: String) {
+        queries.deleteLocalRollupsForDay(deviceId.value, dayLocal)
+    }
 
     override fun upsertSetting(setting: Setting) {
         queries.upsertSetting(
