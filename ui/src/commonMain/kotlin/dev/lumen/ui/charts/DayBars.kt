@@ -1,6 +1,7 @@
 package dev.lumen.ui.charts
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,31 +11,31 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
 import dev.lumen.ui.LumenTheme
 import dev.lumen.ui.formatDuration
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 
 /**
  * One day's total, for the trend view.
  *
- * [dayUtc] is a `YYYY-MM-DD` UTC day — the same key the rollup table uses, so
- * a day here is the same day everywhere (`docs/data-model.md`).
- *
- * Axis labels are derived from [dayUtc] by the chart rather than passed in.
- * An earlier version let each caller format them and macOS produced bare
- * day-of-month numbers — "06 07 08" reads as an hour, a week number, or
- * nothing at all. Deriving them here means all three platforms label the axis
- * identically, which is the point of a shared UI module.
+ * [dayUtc] is a `YYYY-MM-DD` day key. Axis labels are derived from it by the
+ * chart rather than passed in: an earlier version let each caller format them
+ * and macOS produced bare day-of-month numbers ("06 07 08"), which reads as
+ * an hour, a week number, or nothing at all.
  */
 data class DayTotal(
     val dayUtc: String,
@@ -43,32 +44,27 @@ data class DayTotal(
     val isToday: Boolean = false,
 )
 
-/**
- * Axis label for a day: `Wed`, or `Today` for the day in progress.
- *
- * A weekday cannot be mistaken for a duration or a count, which a bare number
- * can. "Today" is spelled out rather than marked with a dot or a colour
- * because the spec requires state to be readable without relying on colour.
- */
+/** Axis label: `Wed`, or `Today` for the day in progress. */
 fun DayTotal.axisLabel(): String =
     if (isToday) "Today" else weekdayShort(dayUtc)
 
 internal fun weekdayShort(dayUtc: String): String =
-    kotlinx.datetime.LocalDate.parse(dayUtc).dayOfWeek.name
+    LocalDate.parse(dayUtc).dayOfWeek.name
         .lowercase()
         .replaceFirstChar { it.uppercase() }
         .take(3)
 
 internal fun monthDay(dayUtc: String): String {
-    val date = kotlinx.datetime.LocalDate.parse(dayUtc)
+    val date = LocalDate.parse(dayUtc)
     val month = date.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)
     return "$month ${date.dayOfMonth}"
 }
 
+/** Full form for a selected day: `Tue, Aug 11`. */
+fun longDayLabel(dayUtc: String): String = "${weekdayShort(dayUtc)}, ${monthDay(dayUtc)}"
+
 /**
- * The window's span, e.g. `Aug 6 – Aug 12`, or `Aug 6 – 12` when both ends
- * share a month. Stated once above the chart so the weekday axis is anchored
- * to actual dates rather than floating.
+ * The window's span, e.g. `Aug 6 – 12`, or `Jul 28 – Aug 3` across months.
  */
 fun dateRangeLabel(days: List<DayTotal>): String {
     if (days.isEmpty()) return ""
@@ -77,76 +73,139 @@ fun dateRangeLabel(days: List<DayTotal>): String {
     if (first == last) return monthDay(first)
     val sameMonth = first.substring(0, 7) == last.substring(0, 7)
     return if (sameMonth) {
-        "${monthDay(first)} – ${kotlinx.datetime.LocalDate.parse(last).dayOfMonth}"
+        "${monthDay(first)} – ${LocalDate.parse(last).dayOfMonth}"
     } else {
         "${monthDay(first)} – ${monthDay(last)}"
     }
 }
 
 /**
- * Chart type 3 of the three v1 charts (`docs/design-spec.md`): per-day
- * totals, trend view.
+ * The running average across every week on record, not just the one shown.
+ *
+ * A seven-day window's own mean moves with whatever week you are looking at,
+ * so comparing a day to it tells you about that week rather than about you.
+ * Averaging over all history gives a line that stays put, which is the only
+ * kind worth drawing next to a bar.
+ *
+ * The in-progress day is excluded: it is a partial number by definition, and
+ * including it drags the average down every morning and lets it recover every
+ * evening, which looks like a trend and is an artefact.
+ *
+ * Returns null when there is no complete day yet — a mean of nothing is not
+ * zero, and drawing a zero line would invite comparison against it.
+ */
+fun runningDailyAverageMs(allDays: List<DayTotal>): Long? {
+    val complete = allDays.filterNot { it.isToday }
+    if (complete.isEmpty()) return null
+    return complete.sumOf { it.totalMs } / complete.size
+}
+
+/**
+ * Chart 3 of the three v1 charts (`docs/design-spec.md`): per-day totals.
  *
  * ## What it deliberately does not do
  *
  * The spec calls Lumen "a mirror, not a judge", and `docs/directions.md`
- * sharpens it for exactly this surface: zero valence — **no "vs last week",
- * no percentages, no trend arrows**, and never green-good/red-bad. So this
- * draws the bars and the numbers and stops. A reader can see their own trend;
- * they do not need the app to have an opinion about it.
+ * sharpens it here: zero valence — no "vs last week", no percentages, no
+ * trend arrows, never green-good/red-bad. The average line is drawn and
+ * labelled; it is not annotated with whether you are above or below it. A
+ * reader can see that for themselves, and the difference between showing
+ * someone their average and telling them how they are doing against it is the
+ * whole distinction the spec is built on.
  *
  * The in-progress day is drawn at reduced opacity rather than flagged,
- * because a partial number sitting at full weight next to complete ones reads
- * as a decline that has not happened yet.
- *
- * Bars are scaled against the largest day in the window, and the scale is
- * stated in the caption. A chart whose baseline is invisible is the "charts
- * that lie" case the spec puts on the uninstall side of the line.
+ * because a partial number at full weight beside complete ones reads as a
+ * decline that has not happened.
  */
 @Composable
 fun DayBars(
     days: List<DayTotal>,
     modifier: Modifier = Modifier,
-    barHeight: androidx.compose.ui.unit.Dp = 96.dp,
+    averageMs: Long? = null,
+    selectedDay: String? = null,
+    onSelectDay: (String) -> Unit = {},
+    barHeight: androidx.compose.ui.unit.Dp = 132.dp,
 ) {
     if (days.isEmpty()) return
 
-    val peak = days.maxOf { it.totalMs }.coerceAtLeast(1L)
+    // The average can exceed every bar in a quiet week; if the scale ignored
+    // it the line would sit outside the chart.
+    val peak = maxOf(days.maxOf { it.totalMs }, averageMs ?: 0L).coerceAtLeast(1L)
 
     Column(modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().height(barHeight),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            days.forEach { day ->
-                Column(
-                    Modifier.weight(1f).fillMaxHeight(),
-                    verticalArrangement = Arrangement.Bottom,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // A day with no recorded time still gets a visible sliver,
-                    // so "nothing recorded" is distinguishable from "no bar
-                    // drawn here" — an absent bar reads as missing data.
-                    val fraction = barFraction(day.totalMs, peak)
-                    // Empty space FIRST, bar second. Reversing these pushes
-                    // each bar up by its own height, so they hang from
-                    // different lines instead of standing on one — which
-                    // makes the chart unreadable and, worse, plausible.
-                    Spacer(Modifier.weight((1f - fraction).coerceAtLeast(0.0001f)))
-                    Box(
+        Box(Modifier.fillMaxWidth().height(barHeight)) {
+            Row(
+                Modifier.fillMaxWidth().fillMaxHeight(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                days.forEach { day ->
+                    val selected = day.dayUtc == selectedDay
+                    Column(
                         Modifier
-                            .fillMaxWidth()
-                            .weight(fraction)
-                            .background(
-                                color = if (day.isToday) {
-                                    LumenTheme.Accent.copy(alpha = 0.45f)
-                                } else {
-                                    LumenTheme.Accent
-                                },
-                                shape = RoundedCornerShape(3.dp),
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onSelectDay(day.dayUtc) },
+                        verticalArrangement = Arrangement.Bottom,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        // Per-day time, above its bar. LO asked for the days
+                        // to be labelled with their time; putting it on the
+                        // bar means the chart and the numbers cannot disagree,
+                        // which the spec requires of every chart.
+                        Text(
+                            formatDuration(day.totalMs),
+                            style = TextStyle(
+                                color = if (selected) LumenTheme.TextPrimary else LumenTheme.TextSecondary,
+                                fontSize = 10.sp,
+                                fontFamily = LumenTheme.TabularFigures,
                             ),
-                    )
+                        )
+                        Spacer(Modifier.height(4.dp))
+
+                        val fraction = barFraction(day.totalMs, peak)
+                        // Empty space FIRST, bar second. Reversing these
+                        // pushes each bar up by its own height so they hang
+                        // from different lines instead of standing on one.
+                        Spacer(Modifier.weight((1f - fraction).coerceAtLeast(0.0001f)))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .weight(fraction)
+                                .background(
+                                    color = when {
+                                        selected -> LumenTheme.TextPrimary
+                                        day.isToday -> LumenTheme.Accent.copy(alpha = 0.45f)
+                                        else -> LumenTheme.Accent
+                                    },
+                                    shape = RoundedCornerShape(3.dp),
+                                ),
+                        )
+                    }
+                }
+            }
+
+            // The average, drawn across the plot. Dashes rather than a solid
+            // rule so it reads as a reference and not as another bar.
+            if (averageMs != null && averageMs > 0) {
+                val fromTop = 1f - barFraction(averageMs, peak)
+                Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+                    Spacer(Modifier.weight(fromTop.coerceIn(0.001f, 0.999f)))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        repeat(48) {
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(1.dp)
+                                    .background(LumenTheme.TextSecondary.copy(alpha = 0.55f)),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight((1f - fromTop).coerceIn(0.001f, 0.999f)))
                 }
             }
         }
@@ -158,13 +217,17 @@ fun DayBars(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             days.forEach { day ->
+                val selected = day.dayUtc == selectedDay
                 Text(
                     day.axisLabel(),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelectDay(day.dayUtc) },
                     textAlign = TextAlign.Center,
                     style = TextStyle(
-                        color = LumenTheme.TextSecondary,
+                        color = if (selected) LumenTheme.TextPrimary else LumenTheme.TextSecondary,
                         fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                         fontFamily = LumenTheme.TabularFigures,
                     ),
                 )
@@ -174,66 +237,22 @@ fun DayBars(
 }
 
 /**
- * The trend view with its heading and scale caption — the whole section as
- * the Today screen uses it.
- *
- * [title] and the caption are passed rather than built here so the copy stays
- * with the screen that shows it; `docs/design-spec.md` owns the words.
- */
-@Composable
-fun DayBarsSection(
-    title: String,
-    days: List<DayTotal>,
-    modifier: Modifier = Modifier,
-) {
-    if (days.isEmpty()) return
-    val peak = days.maxOf { it.totalMs }
-
-    Column(modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                title,
-                style = TextStyle(
-                    color = LumenTheme.TextSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.2.sp,
-                ),
-            )
-            Spacer(Modifier.weight(1f))
-            // Anchor the weekday axis to real dates. Without this the labels
-            // say which days of the week, never which week.
-            Text(
-                dateRangeLabel(days),
-                style = TextStyle(
-                    color = LumenTheme.TextSecondary,
-                    fontSize = 11.sp,
-                    fontFamily = LumenTheme.TabularFigures,
-                ),
-            )
-        }
-        Spacer(Modifier.height(14.dp))
-        DayBars(days)
-        Spacer(Modifier.height(6.dp))
-        // State the scale. A bar chart without one invites the reader to
-        // compare heights across screens where the peak differs.
-        Text(
-            "tallest day ${formatDuration(peak)}",
-            style = TextStyle(
-                color = LumenTheme.TextSecondary,
-                fontSize = 11.sp,
-                fontFamily = LumenTheme.TabularFigures,
-            ),
-        )
-    }
-}
-
-/**
- * Pure layout helper, extracted so it is testable without a renderer: the
- * bar fraction for a day against the window's peak.
- *
- * Clamped to a visible minimum for the reason in [DayBars] — a zero-height
- * bar is indistinguishable from a missing one.
+ * Pure layout helper, extracted so it is testable without a renderer.
+ * Clamped to a visible minimum: a zero-height bar is indistinguishable from
+ * one that failed to render, which reads as missing data rather than an idle
+ * day.
  */
 fun barFraction(totalMs: Long, peakMs: Long, minimum: Float = 0.02f): Float =
     (totalMs.toFloat() / peakMs.coerceAtLeast(1L)).coerceIn(minimum, 1f)
+
+/** Days in `[from, to]` inclusive, as `YYYY-MM-DD`, oldest first. */
+internal fun dayKeysBetween(from: String, to: String): List<String> {
+    var d = LocalDate.parse(from)
+    val last = LocalDate.parse(to)
+    val out = mutableListOf<String>()
+    while (d <= last) {
+        out += d.toString()
+        d = d.plus(1, DateTimeUnit.DAY)
+    }
+    return out
+}

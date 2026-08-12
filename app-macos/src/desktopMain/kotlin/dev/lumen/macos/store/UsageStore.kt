@@ -113,6 +113,47 @@ class UsageStore(
             .appendText(json.encodeToString(FocusEvent.serializer(), event) + "\n")
     }
 
+    /**
+     * Fill in names for apps we have time for but no name.
+     *
+     * The live collector learns a name when it sees an app in the
+     * foreground, but imported Screen Time history carries bundle ids only —
+     * so a month of recovered history rendered as `com.spotify.client`
+     * instead of `Spotify`. Spotlight already knows the mapping.
+     *
+     * Resolved once per unknown id and cached in the same append-only file
+     * the collector writes, so this is not a per-render cost. Ids that
+     * resolve to nothing (uninstalled apps, Apple daemons) are left alone
+     * rather than cached as a guess.
+     */
+    fun resolveMissingNames(appKeys: Collection<AppKey>) {
+        val known = names()
+        appKeys
+            .map { it.value }
+            .filter { it.isNotBlank() && it !in known }
+            .distinct()
+            .forEach { bundleId ->
+                appNameForBundleId(bundleId)?.let { rememberName(AppKey(bundleId), it) }
+            }
+    }
+
+    /** Spotlight lookup: bundle id -> the app's display name, or null. */
+    private fun appNameForBundleId(bundleId: String): String? = runCatching {
+        // Quoted so a crafted id cannot alter the query's structure.
+        val query = "kMDItemCFBundleIdentifier == \"${bundleId.replace("\"", "")}\""
+        val proc = ProcessBuilder("/usr/bin/mdfind", query).redirectErrorStream(false).start()
+        val out = proc.inputStream.bufferedReader().readText()
+        if (!proc.waitFor(MDFIND_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            return null
+        }
+        out.lineSequence()
+            .firstOrNull { it.endsWith(".app") }
+            ?.substringAfterLast('/')
+            ?.removeSuffix(".app")
+            ?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     /** Remember a human-facing app name. Display only, never synced. */
     fun rememberName(appKey: AppKey, displayName: String?) {
         if (displayName.isNullOrBlank()) return
@@ -196,6 +237,41 @@ class UsageStore(
     fun startOfDayMs(dayLocal: String, zone: TimeZone = displayZone()): Long =
         LocalDay.startOfDayMs(dayLocal, zone)
 
+    /**
+     * Running daily mean over every complete day on record — not just the
+     * window on screen.
+     *
+     * A seven-day window's own mean moves with whichever week you are looking
+     * at, so a line drawn from it tells you about that week rather than about
+     * you. Averaging across all history gives a line that stays put.
+     *
+     * Today is excluded: a partial day drags the mean down every morning and
+     * lets it recover every evening, which looks like a trend and is an
+     * artefact. Returns null when no complete day exists yet — a mean of
+     * nothing is not zero, and a zero line invites comparison against it.
+     */
+    fun runningDailyAverageMs(zone: TimeZone = displayZone()): Long? {
+        val today = LocalDay.today(zone)
+        val days = recordedDays(zone).filterNot { it == today }
+        if (days.isEmpty()) return null
+        return days.sumOf { day -> totalsFor(day, zone).sumOf { it.totalMs } } / days.size
+    }
+
+    /**
+     * Every local day that has any recorded usage, oldest first.
+     *
+     * Derived from the event files rather than a stored index, so it cannot
+     * drift out of step with what is actually on disk.
+     */
+    fun recordedDays(zone: TimeZone = displayZone()): List<String> =
+        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
+            .asSequence()
+            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
+            .map { LocalDay.dayOf(it.startedAtMs, zone) }
+            .distinct()
+            .sorted()
+            .toList()
+
     /** The local day containing [epochMs]. */
     fun dayOf(epochMs: Long, zone: TimeZone = displayZone()): String = LocalDay.dayOf(epochMs, zone)
 
@@ -237,6 +313,7 @@ class UsageStore(
 
     companion object {
         private const val MILLIS_PER_DAY = 86_400_000L
+        private const val MDFIND_TIMEOUT_SECONDS = 2L
 
         fun defaultRoot(): File = File(
             System.getProperty("user.home"),
