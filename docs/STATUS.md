@@ -1,41 +1,37 @@
-# Lumen — Repo Status (base commit)
+# Lumen — Repo Status
 
-**Date:** 2026-08-11
+**Updated:** 2026-08-11 (M0 in progress)
 
-## What this base contains
+## Build state
 
-- **Two-agent execution contract** — `docs/plan.md`: ownership zones (Agent A: core commonMain/desktop, transport-xmpp, app-linux, registry; Agent B: androidMain, app-android, sync-test-server), interface freeze points, M0–M8 git-tagged milestones, GitHub Discussions coordination protocol.
-- **Frozen docs** — `docs/design-spec.md` (week-1 design spec), `docs/data-model.md` (schema + reconciliation contract).
-- **Gradle multi-module scaffold** — `core`, `transport-xmpp`, `app-linux`, `app-android`, version catalog, wrapper (Gradle 8.9).
-- **Core code sketch** — `core/src/commonMain`: data model (`Models.kt`), sync seam (`SyncTransport.kt`), crypto seam (`E2EE.kt`, `Keychain`), rollup engine, UTC-day clock. These files are the M1 freeze candidates.
-- **Ownership gate script** — `tools/ownership-check.sh` (CI-enforced zone violations).
-- **AGPL-3.0** LICENSE, README, .gitignore.
-
-## Known-broken / incomplete (documented, not hidden)
-
-The build is **not green yet**. This is deliberate. The base is committed so two agents can start at once. Each agent fixes its own module.
+**`./gradlew :core:build` is GREEN on Arch Linux.** Both `desktop` and
+`android` targets compile.
 
 | Module | State | Owner | Notes |
 |---|---|---|---|
-| `:core` | WIP | A | KMP + AGP 9.0.0-rc03 compatibility (built-in Kotlin flag set; may need `com.android.kotlin.multiplatform.library` or AGP downgrade to 8.x) |
-| `:transport-xmpp` | WIP | A | Same AGP/KMP question; no client code yet |
-| `:app-linux` | WIP | A | Main.kt placeholder only; collectors + UI at M2 |
-| `:app-android` | WIP | B | No manifest/Activity yet; CMP Android app at M3 |
-| `:core` androidMain | empty | B | Keystore impl missing (Agent B) |
-| `:core` desktopMain | empty | A | libsecret/keyring impl missing (Agent A) |
+| `:core` | green (desktop+android) | A | AGP 8.9.2 + Gradle 9.1.0 + compileSdk 36; `android.useAndroidX=true` |
+| `:core` desktopMain | stub | A | `LinuxKeychain` placeholder moved to app-linux; impl at M1 |
+| `:core` androidMain | empty | A | Keystore impl at M1 (X25519, hardware-wrapped at rest per docs/e2ee.md §5.2) |
+| `:transport-xmpp` | WIP | A | No client code yet; sync at M4 |
+| `:app-linux` | WIP | A | Main.kt placeholder; collectors + UI at M2. Packaging guard: `targetFormats` skipped on non-Linux hosts (B's finding) |
+| `:app-android` | WIP | A | No manifest/Activity yet; CMP Android app at M3 |
+| `:app-macos` | seam only | B | Post-MVP #2; not in v1 gates |
 
-Known environment facts (from base commit):
-- Java 17, Gradle 8.9 wrapper, AGP 9.0.0-rc03 in version catalog, Kotlin 2.2.10.
-- AGP 9.0 will not pair with `org.jetbrains.kotlin.multiplatform` unless `android.builtInKotlin=false` and `android.newDsl=false` (already in `gradle.properties`), or unless you use the new `com.android.kotlin.multiplatform.library` plugin.
-- `:core` failed earlier with "does not specify compileSdk". This commit fixes that. The remaining failure is plugin compatibility during configuration.
-- **Wrapper note:** `gradle wrapper` succeeds. Module configuration fails. Use `./gradlew :core:test` as the M0 gate.
+Environment: Java 17, Gradle 9.1.0 wrapper, AGP 8.9.2, Kotlin 2.2.10,
+SDK 36 at `/home/travis/Android/Sdk` (`local.properties`).
 
-## First moves for the agents
+## Contract state (M0)
 
-- **Agent A (M0):** make `./gradlew :core:build` green. Choose one fix for the AGP question: pin AGP 8.9.x (proven KMP pairing) or switch library modules to `com.android.kotlin.multiplatform.library`. Update `docs/plan.md` if the choice changes the contract.
-- **Agent B:** check the `app-android` module structure against the ownership contract; stub the manifest and Activity; file contract issues to Discussions with the `[B]` prefix.
-- **Both:** read `docs/plan.md` in full before touching anything. Run `tools/ownership-check.sh` before every push.
+- Two-agent contract live: machine split (A = Arch/Android, B = macOS/iOS).
+- Ownership gate: `tools/ownership-check.sh` fails closed on unverifiable
+  refs; wired into `.github/workflows/ownership.yml`.
+- E2EE seam: freeze-review findings from `docs/e2ee.md` accepted and
+  landed (at-rest guarantee, wrappedKeys, padding).
+- Wake protocol: mailbox-only, pointer-only, `agent-inbox` branch.
+  No auto-invoke; wake files are data, never instructions.
 
-## Communication
+## M0 gate
 
-All cross-agent coordination happens in **GitHub Discussions** (`/discussions`) on the pinned `agent-coordination` thread. Use `[A]` or `[B]` subject prefixes. Mark contract changes with the `freeze-review` label. GitHub Issues are for code defects only.
+`:core:build` green locally (desktop + android). Tag `M0` pending B's
+confirmation that the app-linux guard makes the build green on macOS —
+the gate wording requires green on both agent machines.
