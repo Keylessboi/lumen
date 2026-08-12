@@ -2,9 +2,11 @@ package dev.lumen.core.store
 
 import app.cash.sqldelight.Query
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.db.LumenDatabase
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.model.ControlState
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.MinuteBucket
@@ -153,6 +155,55 @@ class JvmLumenStore private constructor(
 
     override fun setAckedSeq(deviceId: DeviceId, seq: Long) {
         queries.upsertWatermark(deviceId.value, seq)
+    }
+
+    override fun controlState(controlKey: String): ControlState? =
+        queries.selectControlState(controlKey).executeAsOneOrNull()?.let { row ->
+            ControlState(
+                controlKey = row.control_key,
+                deviceId = DeviceId(row.device_id),
+                deviceSeq = row.device_seq,
+                startedAtMs = row.started_at_ms,
+                utcDay = row.utc_day,
+                released = row.released == 1L,
+            )
+        }
+
+    override fun takeControl(
+        controlKey: String,
+        deviceId: DeviceId,
+        deviceSeq: Long,
+        startedAtMs: Long,
+    ) {
+        val existing = controlState(controlKey)
+        // Newest per-device seq wins. Existing declarations with a higher
+        // seq keep control; equal seq falls back to the LOWER device_id
+        // (deterministic on both sides, never wall-clock).
+        if (existing != null && existing.deviceSeq > deviceSeq) return
+        if (existing != null && existing.deviceSeq == deviceSeq && existing.deviceId.value < deviceId.value) return
+        queries.upsertControlState(
+            control_key = controlKey,
+            device_id = deviceId.value,
+            device_seq = deviceSeq,
+            started_at_ms = startedAtMs,
+            utc_day = UtcDay.today(),
+            released = 0L,
+        )
+    }
+
+    override fun releaseControl(controlKey: String, deviceId: DeviceId, deviceSeq: Long) {
+        val existing = controlState(controlKey) ?: return
+        // Only the current controller may release.
+        if (existing.deviceId != deviceId) return
+        if (deviceSeq < existing.deviceSeq) return
+        queries.upsertControlState(
+            control_key = controlKey,
+            device_id = deviceId.value,
+            device_seq = deviceSeq,
+            started_at_ms = existing.startedAtMs,
+            utc_day = existing.utcDay,
+            released = 1L,
+        )
     }
 
     override fun pruneEvents(beforeMs: Long) {

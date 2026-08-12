@@ -68,6 +68,19 @@ CREATE TABLE sync_watermark (
     last_acked_seq INTEGER NOT NULL
 );
 
+-- Control-state takeover (docs/data-model.md "two devices at once" rule).
+-- The device that last declared itself the active controller owns the
+-- state until a newer declaration supersedes it. Tiebreak (device_id, seq),
+-- NEVER wall-clock — two skewed clocks must not flip-flop ownership.
+CREATE TABLE control_state (
+    control_key   TEXT PRIMARY KEY,        -- 'focus_session' | 'limit' | 'nudge'
+    device_id     TEXT NOT NULL,
+    device_seq    INTEGER NOT NULL,        -- monotonic per device; the tiebreak
+    started_at_ms INTEGER NOT NULL,        -- display hint only, never the tiebreak
+    utc_day       TEXT NOT NULL,
+    released      INTEGER NOT NULL DEFAULT 0  -- 0=active, 1=explicitly released
+);
+
 -- Queries used by the storage layer (Agent A). Names are contract —
 -- the storage API is part of the frozen surface.
 
@@ -124,3 +137,10 @@ DELETE FROM events WHERE started_at_ms < ?;
 
 pruneBucketsBefore:
 DELETE FROM buckets WHERE bucket_ts < ?;
+
+selectControlState:
+SELECT * FROM control_state WHERE control_key = ?;
+
+upsertControlState:
+INSERT OR REPLACE INTO control_state(control_key, device_id, device_seq, started_at_ms, utc_day, released)
+VALUES (?, ?, ?, ?, ?, ?);

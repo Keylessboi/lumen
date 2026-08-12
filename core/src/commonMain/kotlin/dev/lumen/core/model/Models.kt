@@ -116,3 +116,30 @@ data class SyncWatermark(
     val deviceId: DeviceId,
     val lastAckedSeq: Long,
 )
+
+/**
+ * Control-state declaration — the "two devices at once" takeover rule
+ * (docs/data-model.md, "Control-state takeover").
+ *
+ * Governs exactly one active control: which device owns the live focus
+ * session / limit / nudge right now. Usage data is NEVER subject to this —
+ * phone time + desktop time always sum.
+ *
+ * Takeover: the declaration with the newest per-device [deviceSeq] wins;
+ * the prior controller yields. [startedAtMs] is a display hint ONLY, never
+ * the tiebreak — two devices with skewed clocks must not flip-flop
+ * ownership. Tiebreak is (deviceId, deviceSeq), deterministic on both sides.
+ *
+ * [released] is an explicit handoff ("this device ended the session"),
+ * written instead of deleting the row — delete is a tombstone race,
+ * release is a state.
+ */
+@Serializable
+data class ControlState(
+    val controlKey: String,
+    val deviceId: DeviceId,
+    val deviceSeq: Long,
+    val startedAtMs: Long,
+    val utcDay: String,
+    val released: Boolean = false,
+)

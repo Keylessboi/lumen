@@ -2,6 +2,7 @@ package dev.lumen.core.store
 
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.model.ControlState
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.MinuteBucket
@@ -62,6 +63,24 @@ interface LumenStore {
     fun lastAckedSeq(deviceId: DeviceId): Long
 
     fun setAckedSeq(deviceId: DeviceId, seq: Long)
+
+    // ---- control-state takeover (docs/data-model.md) ----
+
+    /**
+     * Read the current control declaration for [controlKey].
+     * Returns null when no device has declared it.
+     */
+    fun controlState(controlKey: String): ControlState?
+
+    /**
+     * Declare this device the active controller. The caller supplies the
+     * per-device monotonic [deviceSeq]; the declaration with the newest
+     * seq wins and the prior controller yields. Never wall-clock.
+     */
+    fun takeControl(controlKey: String, deviceId: DeviceId, deviceSeq: Long, startedAtMs: Long)
+
+    /** Explicit handoff: this device releases the control. */
+    fun releaseControl(controlKey: String, deviceId: DeviceId, deviceSeq: Long)
 
     /** Prune events older than the retention horizon (30 days). */
     fun pruneEvents(beforeMs: Long)

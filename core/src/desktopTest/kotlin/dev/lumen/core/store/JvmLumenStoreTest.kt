@@ -13,8 +13,10 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class JvmLumenStoreTest {
 
@@ -139,5 +141,81 @@ class JvmLumenStoreTest {
 
         assertEquals(1, store.eventsAfter(device, 0).size) // only the recent one
         assertEquals(0, store.bucketsForRange(device, now - 300L * 86_400_000, now).size)
+    }
+
+    // ---- control-state takeover (docs/data-model.md) ----
+
+    @Test
+    fun `latest device takes over control`() {
+        val phone = DeviceId("phone")
+        val desktop = DeviceId("desktop")
+
+        store.takeControl("focus_session", phone, deviceSeq = 5, startedAtMs = 1_000)
+        val afterPhone = store.controlState("focus_session")
+        assertEquals(phone, afterPhone?.deviceId)
+
+        // Desktop declares later with a higher seq — it takes over.
+        store.takeControl("focus_session", desktop, deviceSeq = 6, startedAtMs = 2_000)
+        val afterDesktop = store.controlState("focus_session")
+        assertEquals(desktop, afterDesktop?.deviceId)
+        assertEquals(6L, afterDesktop?.deviceSeq)
+        assertFalse(afterDesktop?.released!!)
+    }
+
+    @Test
+    fun `older declaration cannot take over`() {
+        val phone = DeviceId("phone")
+        val desktop = DeviceId("desktop")
+
+        store.takeControl("focus_session", phone, deviceSeq = 10, startedAtMs = 5_000)
+        // Desktop's seq is older — the phone keeps control.
+        store.takeControl("focus_session", desktop, deviceSeq = 3, startedAtMs = 99_000)
+        val current = store.controlState("focus_session")
+        assertEquals(phone, current?.deviceId)
+        // Wall-clock skew is irrelevant: startedAtMs 99_000 (desktop's)
+        // must NOT win over seq 10.
+        assertEquals(5_000, current?.startedAtMs)
+    }
+
+    @Test
+    fun `equal seq falls back to device id ordering`() {
+        val a = DeviceId("aaa")
+        val b = DeviceId("bbb")
+        store.takeControl("focus_session", b, deviceSeq = 7, startedAtMs = 1_000)
+        store.takeControl("focus_session", a, deviceSeq = 7, startedAtMs = 2_000)
+        // Equal seq: lower device_id wins ("aaa" < "bbb").
+        assertEquals(a, store.controlState("focus_session")?.deviceId)
+    }
+
+    @Test
+    fun `release is explicit and only the controller can release`() {
+        val phone = DeviceId("phone")
+        val desktop = DeviceId("desktop")
+
+        store.takeControl("focus_session", phone, deviceSeq = 1, startedAtMs = 1_000)
+        // Desktop is not the controller — cannot release.
+        store.releaseControl("focus_session", desktop, deviceSeq = 2)
+        assertFalse(store.controlState("focus_session")?.released!!)
+
+        // Phone releases its own control.
+        store.releaseControl("focus_session", phone, deviceSeq = 2)
+        val released = store.controlState("focus_session")
+        assertTrue(released?.released!!)
+        assertEquals(phone, released.deviceId)
+    }
+
+    @Test
+    fun `released control can be re-taken`() {
+        val phone = DeviceId("phone")
+        val desktop = DeviceId("desktop")
+        store.takeControl("focus_session", phone, deviceSeq = 1, startedAtMs = 1_000)
+        store.releaseControl("focus_session", phone, deviceSeq = 2)
+        assertTrue(store.controlState("focus_session")?.released!!)
+
+        // Desktop takes over a released session.
+        store.takeControl("focus_session", desktop, deviceSeq = 3, startedAtMs = 3_000)
+        val current = store.controlState("focus_session")
+        assertEquals(desktop, current?.deviceId)
+        assertFalse(current?.released!!)
     }
 }

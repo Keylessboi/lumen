@@ -16,17 +16,42 @@ raw events (local, ~30d)  ->  1-min buckets (local, ~6mo)  ->  app-day rollups (
   platform forces this model; it is not a compromise.
 - **App-day rollups** are the sync/API unit. Kept forever. Tiny.
 
-## Reconciliation (TWO strategies — never one)
+## Reconciliation (THREE strategies — never one)
 
 | Data | Strategy | Rule |
 |---|---|---|
 | events / buckets / rollups | **append-merge** | remove duplicates by (device_id, monotonic seq); immutable; sum across devices |
 | settings / limits / overrides | **LWW + UTC-day** | last write wins per field, tiebreak (device_id, seq); UTC day boundary |
+| **control state** (active focus session, active limit, live nudge) | **latest declarer takes over** | the device that last declared itself the active controller owns the state until a newer declaration supersedes it; tiebreak (device_id, seq); NEVER wall-clock |
 
 **NO CRDT. NO last-write-wins by clock time for events.** A device with
 a wrong clock must never silently overwrite data. Server order (pubsub
 item ID / MAM archive ID) is the ordering authority; gaps and jumps
 show a sync-integrity warning instead of silent convergence.
+
+## Control-state takeover (the "two devices at once" rule)
+
+When two devices are both live, the one that acted last controls the
+active session. This is a deliberate third strategy, distinct from
+settings LWW:
+
+- **What it governs:** exactly one control record — "which device owns
+  the active focus session / limit / nudge right now". Usage data is
+  NEVER subject to takeover: phone time + desktop time always sum.
+- **How a device takes over:** it writes a new control declaration
+  `(control_key, device_id, device_seq, started_at_ms, utc_day)`. The
+  declaration with the newest per-device seq wins; the prior controller
+  yields.
+- **Why not wall-clock:** `updated_at_ms` is a display hint only. Two
+  devices with skewed clocks must not flip-flop ownership — the tiebreak
+  is (device_id, seq), deterministic on both sides.
+- **Empty handoff:** a device ending a focus session writes an explicit
+  "released" declaration rather than deleting the record. Delete is a
+  tombstone race; release is a state.
+- **Surface to user:** the UI shows which device holds the active
+  control ("Focus session held by Phone — Desktop"). If a declaration
+  is newer than the displayed one, the UI re-syncs and shows the new
+  controller. No prompt, no merge — the latest declarer is authoritative.
 
 ## IDs
 
