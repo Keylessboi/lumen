@@ -2,10 +2,13 @@ package dev.lumen.ui.charts
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -45,6 +48,27 @@ data class CategorySlice(
  * to less than the day and quietly overstate everything else — the "numbers
  * and charts must agree" line in the spec.
  */
+/**
+ * Chart 1 of the three in `docs/design-spec.md`: per-category time at a
+ * single glance.
+ *
+ * ## Why this is a strip and a caption, not a chart with a legend
+ *
+ * The first version stacked a bar on top of a legend with one row per
+ * category — name, swatch, time. That is the same shape as the app list
+ * directly below it, so the screen showed two near-identical lists and the
+ * summary crowded out the detail it was summarising. On a busy day the apps
+ * were pushed off the bottom by their own totals.
+ *
+ * So the categories collapse to one strip plus a wrapped caption, and the
+ * link to the detail is carried by COLOUR: every app row below is drawn in
+ * its category's hue. The strip is the same data as the list, one level up,
+ * rather than a competing block.
+ *
+ * Uncategorized is shown, never hidden. Dropping it would make the strip add
+ * up to less than the day and quietly overstate everything else.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CategoryBar(
     slices: List<CategorySlice>,
@@ -53,7 +77,7 @@ fun CategoryBar(
     val total = slices.sumOf { it.totalMs }
     if (slices.isEmpty() || total <= 0L) return
 
-    // Uncategorized last regardless of size: it is the residual, and a bar
+    // Uncategorized last regardless of size: it is the residual, and a strip
     // that reorders itself as categories overtake each other is hard to read
     // day to day.
     val ordered = slices.sortedWith(
@@ -63,54 +87,51 @@ fun CategoryBar(
     Column(modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             ordered.forEach { slice ->
                 Box(
                     Modifier
                         .weight((slice.totalMs.toFloat() / total).coerceAtLeast(0.004f))
-                        .fillMaxWidth()
-                        .height(10.dp)
+                        .fillMaxHeight()
                         .background(LumenTheme.colorForCategory(slice.name)),
                 )
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // Legend with times. The chart and the numbers are the same object,
-        // so they cannot disagree.
-        ordered.forEach { slice ->
-            Row(
-                Modifier.fillMaxWidth().height(22.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(LumenTheme.colorForCategory(slice.name)),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    slice.name,
-                    style = TextStyle(
-                        color = LumenTheme.TextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Normal,
-                    ),
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    formatDuration(slice.totalMs),
-                    modifier = Modifier.width(LumenTheme.TimeColumnWidth),
-                    textAlign = TextAlign.End,
-                    style = TextStyle(
-                        color = LumenTheme.TextSecondary,
-                        fontSize = 12.sp,
-                        fontFamily = LumenTheme.TabularFigures,
-                        fontFeatureSettings = "tnum",
-                    ),
-                )
+        // One wrapped line rather than a row per category. FlowRow so a
+        // narrow window reflows instead of clipping the last few.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ordered.forEach { slice ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(LumenTheme.colorForCategory(slice.name)),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        slice.name,
+                        style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 11.sp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        formatDuration(slice.totalMs),
+                        style = TextStyle(
+                            color = LumenTheme.TextPrimary,
+                            fontSize = 11.sp,
+                            fontFamily = LumenTheme.TabularFigures,
+                            fontFeatureSettings = "tnum",
+                        ),
+                    )
+                }
             }
         }
     }
