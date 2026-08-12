@@ -1,8 +1,8 @@
 # Lumen — Repo Status
 
-**Updated:** 2026-08-12. Head `0b7dff0` (+ #48). Tags: `M0`, `M1`.
+**Updated:** 2026-08-12. Head `0b7dff0` (+ #48, + M4 sync/E2EE stack). Tags: `M0`, `M1`.
 
-`./gradlew build` is green, including `:app-android`. **350 tests, 0 failed.**
+`./gradlew build` is green, including `:app-android`. **350+ tests, 0 failed.**
 
 ## Where v1 actually stands
 
@@ -15,7 +15,7 @@ Mac, and they are the three with hardware in them.
 |---|---|
 | `G1` Linux slice | collector written and previously verified live by A; **not re-verified since the dedupe/title fixes**; Sway + X11 collectors landed (#48), store wired to SQLite (#48) |
 | `G2` Android slice | collector written, **compile-verified only** — no device has ever run it |
-| `G3` sync + E2EE | **not started.** No XMPP client exists |
+| `G3` sync + E2EE | **core in code, live-verified on a real provider**: XmppTransport (XEP-0077 IBR + PEP pubsub), SyncEngine (watermark/dedupe/gap), CryptoBoxE2EE (X25519 + XSalsa20-Poly1305), EncryptedTransport, LinuxKeychain. Two-device E2E passed live on jabber.fr. Not a gate sign-off: provider picker UI + Android keychain remain |
 | `G4` export/migrate | **met in code**: format, Argon2id + AES-GCM, UI, atomic writes, round-trip tested |
 | `G5` categories | **logic met**: 185-entry registry, sticky overrides, corpus test. Needs a real-world app-list pass |
 | `G6` nudge + polish | nudge done; design pass and RC not done |
@@ -27,7 +27,7 @@ Mac, and they are the three with hardware in them.
 | `:core` | model, store seam, rollup, UTC + **local day**, categories, nudge, export | A |
 | `:core` commonTest | contract suite, 209 tests | B |
 | `:ui` | **shared** Today screen, charts, export section — all three apps render it | B |
-| `:transport-xmpp` | **empty.** No client code | A |
+| `:transport-xmpp` | XMPP client: XEP-0077 IBR, PEP pubsub publish/pull, embedded provider list | A |
 | `:app-linux` | Hyprland + Sway + X11 collectors, shared UI, **SQLite store wired** (#48) | A |
 | `:app-android` | UsageStats collector + shared UI; in-memory store pending `LumenStore` | A |
 | `:app-macos` | full local slice: collector, Screen Time import, NDJSON store, menu bar, categories, nudge, export | B |
@@ -67,12 +67,29 @@ render `:ui`. (#35)
 **M5 export** (#40, #42, #45), **M6 categories** (#43), **M7 break reminder**
 (#44). Details in the PRs.
 
+**M4 sync + E2EE core landed (Agent A).** `:transport-xmpp` went from empty
+to a working XMPP client: XEP-0077 in-band registration (verified live —
+accounts created on yax.im and jabber.fr), PEP pubsub publish/pull on the
+user's own JID. The frozen seams are implemented: `SyncEngine`
+(watermark pull/push, `(device_id, seq)` dedupe, gap/replay detection,
+hash-chain integrity hook), `CryptoBoxE2EE` (X25519 + XSalsa20-Poly1305,
+libsodium `crypto_box` construction on BC primitives — no JNA natives),
+`EncryptedTransport` decorator, `LinuxKeychain` (Secret Service), and
+`SyncManager` wiring both the headless service and the windowed app to a
+5-minute sync loop. **G3 two-device E2E passed live on jabber.fr**:
+device A published an encrypted event, device B pulled and decrypted it.
+Two measured provider findings documented in `Providers.kt` (jabber.fr
+PEP nodes are transient; yax.im rate-limits registrations per IP).
+
 ## What is left for v1
 
 **Agent A** — the larger half, and all three unverifiable gates:
 
-- **M4 is the biggest unbuilt piece.** No XMPP client, no IBR, no provider
-  picker, no sync engine, no E2EE implementation behind the seam.
+- **M4 core landed**: XMPP client (IBR + PEP pubsub), sync engine
+  (watermark/dedupe/gap), E2EE (X25519 + XSalsa20-Poly1305),
+  EncryptedTransport, LinuxKeychain, SyncManager + sync loops.
+  **G3 two-device E2E passed live on jabber.fr.** Remaining: provider
+  picker UI (needs ui/), Android keychain.
 - M2: Sway and X11 collectors **landed** (#48). JvmLumenStore wired into
   app-linux (#48). Hyprland needs re-verifying after the dedupe and title
   fixes.
@@ -81,7 +98,9 @@ render `:ui`. (#35)
 
 **Agent B**:
 
-- `tools/sync-test-server` + ciphertext verifier — blocked on the M4 envelope.
+- `tools/sync-test-server` + ciphertext verifier — **unblocked**: the M4
+  envelope is frozen (`EncryptedPayload` @Serializable, version-gated;
+  `CryptoBoxE2EE` per docs/e2ee.md §6).
 - `app-macos` onto `LumenStore` (still NDJSON).
 - `MacosKeychain`, so exports can carry a real device identity. `deviceKeys`
   currently exports empty, which is honest but incomplete.
