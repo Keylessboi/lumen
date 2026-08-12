@@ -14,12 +14,15 @@ import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.DeviceId
+import dev.lumen.core.category.DayView
+import dev.lumen.core.category.sessionCategoryEngine
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
+import dev.lumen.ui.charts.CategorySlice
 import kotlinx.coroutines.delay
 
 /**
@@ -64,6 +67,13 @@ class MainActivity : ComponentActivity() {
             val day = remember { DayAccumulator() }
 
             var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
+            var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
+
+            // The same shared derivation macOS and Linux use, so the strip is
+            // exactly the app list grouped and the three platforms cannot
+            // drift. Session overrides: the registry half is real, and nothing
+            // pretends a choice survives a restart until the store is wired.
+            val dayView = remember { DayView(sessionCategoryEngine()) }
             var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
             var liveAppName by remember { mutableStateOf<String?>(null) }
             var liveSinceMs by remember { mutableStateOf(0L) }
@@ -93,6 +103,9 @@ class MainActivity : ComponentActivity() {
                             totalMs = ms,
                         )
                     }
+                totals = dayView.rows(totals)
+                categories = dayView.categoryNames(totals)
+                    .map { (name, ms) -> CategorySlice(name, ms) }
             }
 
             LaunchedEffect(permission) {
@@ -157,6 +170,7 @@ class MainActivity : ComponentActivity() {
 
             TodayScreen(
                 totals = totals,
+                categories = categories,
                 totalMs = visibleTotalMs() + liveMs,
                 liveApp = null,
                 showLiveApp = false,
