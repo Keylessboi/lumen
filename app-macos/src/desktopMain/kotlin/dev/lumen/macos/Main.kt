@@ -51,6 +51,10 @@ import kotlinx.coroutines.delay
 fun main() = application {
     val store = remember { UsageStore() }
     val deviceId = remember { store.deviceId() }
+    // The tracker's own seq counter restarts at 0 on every launch. That is
+    // harmless only because UsageStore.append stamps the store's seq over it
+    // — against a raw LumenStore it would collide with the previous session's
+    // rows and INSERT OR IGNORE would drop them all without a word.
     val tracker = remember { FocusSessionTracker(deviceId) }
     val collector = remember { LsAppInfoCollector() }
 
@@ -188,16 +192,7 @@ fun main() = application {
     val liveMs = liveMsWithinDay(nowMs = now, sessionStartedAtMs = liveSinceMs, dayStartMs = dayStartMs)
     val totalMs = totals.sumOf { it.totalMs } + liveMs
 
-    var history by remember {
-        mutableStateOf(
-            when (FullDiskAccess.status()) {
-                FullDiskAccess.Status.Granted ->
-                    if (store.importWatermark() > 0L) HistoryState.Hidden else HistoryState.Ready
-                FullDiskAccess.Status.Denied -> HistoryState.Offer
-                FullDiskAccess.Status.Unavailable -> HistoryState.Hidden
-            }
-        )
-    }
+    var history by remember { mutableStateOf(openingHistoryState(store)) }
 
     // The menu bar item — the app's primary surface.
     Tray(
@@ -408,6 +403,42 @@ fun main() = application {
                 onDismissHistory = { history = HistoryState.Hidden },
             )
         }
+    }
+}
+
+/**
+ * What the banner says when the window first opens.
+ *
+ * A one-time migration outranks the import offer: the user's history has just
+ * moved to a different file on their disk, and a data move nobody is told
+ * about is indistinguishable from a data loss they have not noticed yet. It
+ * names the archive so "where did my files go" has an answer on screen rather
+ * than in a commit message.
+ */
+private fun openingHistoryState(store: UsageStore): HistoryState {
+    val migration = store.migration
+    if (migration.ranAtAll) {
+        return HistoryState.Message(
+            buildString {
+                append("Moved ${migration.migratedEvents} recorded sessions into Lumen's database. ")
+                if (migration.skippedLines > 0) {
+                    // Said out loud, with the count. A migration that quietly
+                    // dropped part of someone's history is the failure this
+                    // whole path is built to avoid.
+                    append("${migration.skippedLines} unreadable ")
+                    append(if (migration.skippedLines == 1) "line was" else "lines were")
+                    append(" skipped. ")
+                }
+                append("The original files are kept, unchanged, in ")
+                append("~/Library/Application Support/Lumen/migrated.")
+            },
+        )
+    }
+    return when (FullDiskAccess.status()) {
+        FullDiskAccess.Status.Granted ->
+            if (store.importWatermark() > 0L) HistoryState.Hidden else HistoryState.Ready
+        FullDiskAccess.Status.Denied -> HistoryState.Offer
+        FullDiskAccess.Status.Unavailable -> HistoryState.Hidden
     }
 }
 

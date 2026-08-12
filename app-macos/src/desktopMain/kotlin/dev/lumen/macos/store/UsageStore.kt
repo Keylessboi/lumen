@@ -7,34 +7,44 @@ import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.Setting
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.macos.names.SpotlightNameResolver
-import dev.lumen.core.clock.UtcDay
 import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
+import dev.lumen.core.store.JvmLumenStore
+import dev.lumen.core.store.LumenStore
 import dev.lumen.ui.charts.DayTotal
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.rollup.RollupEngine
-import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
 /**
  * Local-only usage store for the macOS app.
  *
- * Events are appended as NDJSON, one file per UTC day, under
- * `~/Library/Application Support/Lumen/`. Per-app day totals are derived on
- * read via [RollupEngine.bucket] rather than stored — `RollupEngine`'s own
- * contract says buckets and rollups are DERIVED, never authoritative.
+ * Events live in [LumenStore] — the frozen storage seam, SQLite underneath,
+ * the same one `app-linux` writes to. `app-macos` shipped ahead of that seam
+ * and kept its own append-only NDJSON files; [NdjsonMigration] moves them
+ * across on first open and archives the originals. See [migration].
  *
- * Deliberately not SQLite: the SQLite schema lives in `core` and freezes at
- * M1 (Agent A's zone). Duplicating it here would create a second, divergent
- * definition of the same tables. NDJSON is a local cache this module owns
- * outright and can throw away when `core`'s store lands.
+ * Per-app day totals are still DERIVED on read rather than stored:
+ * `RollupEngine`'s contract says buckets and rollups are derived, never
+ * authoritative, and deriving from the events means the read filters
+ * ([MacSystemUi]) and the display timezone can change without a rewrite of
+ * anything already recorded.
  *
- * Bucket-to-day assignment goes through [UtcDay.dayOf] on each bucket's
- * timestamp, not the event's start, so a session spanning UTC midnight splits
- * across both days — the locked UTC-day rule, applied where it actually bites.
+ * ## Events are the record here, so they are not pruned
+ *
+ * `docs/data-model.md` prunes events at ~30 days on the assumption that
+ * rollups carry the long history. On macOS the display derives from events,
+ * so pruning them would delete the visible past — including the month of
+ * imported Screen Time history this migration exists to protect. Nothing in
+ * `app-macos` calls [LumenStore.pruneEvents], and nothing should until the
+ * rollup tables are populated and read.
+ *
+ * Bucket-to-day assignment goes through the local-day window on each bucket's
+ * timestamp, not the event's start, so a session spanning midnight splits
+ * across both days.
  */
 class UsageStore(
     private val root: File = defaultRoot(),
@@ -44,23 +54,65 @@ class UsageStore(
      * behind one seam in core so the *gap* is only solved once.
      */
     private val nameResolver: AppNameResolver = SpotlightNameResolver(),
+    /**
+     * The durable record. Defaults to the SQLite database beside the app's
+     * other data; injectable so a test can hand in an in-memory one.
+     */
+    private val store: LumenStore = JvmLumenStore.open(File(root, DB_NAME)),
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
 
-    init {
-        root.mkdirs()
-    }
+    // Everything the init block touches is declared ABOVE it. A `by lazy`
+    // declared below is still a null delegate field while init runs, and
+    // reading it there throws — which it did.
 
-    /** Stable per-install device identity, created once. */
-    fun deviceId(): DeviceId {
+    /**
+     * Stable per-install device identity, created once.
+     *
+     * Held rather than re-read: it is now stamped onto every event, and the
+     * migration depends on it being the SAME id the NDJSON was written under
+     * — a different one and the migrated rows belong to a device that never
+     * existed and join to nothing.
+     */
+    private val device: DeviceId by lazy {
         val f = File(root, "device-id")
         if (f.exists()) {
-            f.readText().trim().takeIf { it.isNotEmpty() }?.let { return DeviceId(it) }
+            f.readText().trim().takeIf { it.isNotEmpty() }?.let { return@lazy DeviceId(it) }
         }
         val id = UUID.randomUUID().toString()
         f.writeText(id)
-        return DeviceId(id)
+        DeviceId(id)
     }
+
+    /**
+     * Every event this device holds.
+     *
+     * Read once and kept, because every display number is derived from the
+     * events and the screen re-derives about once a second. Lazy, so it loads
+     * after the migration has run and a migrated event is in here from the
+     * first render.
+     */
+    private val events: MutableList<FocusEvent> by lazy {
+        store.eventsAfter(device, -1L).toMutableList()
+    }
+
+    /** One past the highest seq in the store. See [append]. */
+    private var seqCursor: Long = -1L
+
+    /**
+     * What the one-time NDJSON migration did, for the app to report.
+     *
+     * Runs at open rather than on demand: a migration nobody remembers to
+     * call leaves a month of someone's history sitting in files nothing reads,
+     * and the app comes up empty with no error anywhere.
+     */
+    val migration: NdjsonMigration.Report
+
+    init {
+        root.mkdirs()
+        migration = NdjsonMigration.run(root, store, device)
+    }
+
+    fun deviceId(): DeviceId = device
 
     /**
      * Newest event timestamp already imported from the Knowledge store, or 0
@@ -88,10 +140,7 @@ class UsageStore(
      * Before this point is history Lumen genuinely missed; after it is a
      * duplicate.
      */
-    fun earliestEventMs(): Long? =
-        eventFiles()
-            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
-            .minOfOrNull { it.startedAtMs }
+    fun earliestEventMs(): Long? = events.minOfOrNull { it.startedAtMs }
 
     /**
      * The end of Lumen's own coverage — the last moment it recorded — or null
@@ -100,39 +149,48 @@ class UsageStore(
      * Pairs with [earliestEventMs] to bound the two importable ranges: before
      * Lumen ever ran, and since it last ran.
      */
-    fun latestEventMs(): Long? =
-        eventFiles()
-            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
-            .maxOfOrNull { it.startedAtMs + it.durationMs }
+    fun latestEventMs(): Long? = events.maxOfOrNull { it.startedAtMs + it.durationMs }
 
     /**
-     * One past the highest seq the store holds, so an import continues the
-     * sequence rather than restarting it.
+     * One past the highest seq the store holds.
      *
-     * Harmless in this NDJSON cache, which never reads seq — but
-     * `(device_id, seq)` is the primary key in `LumenStore`, and colliding
-     * seqs there would be silently dropped by `INSERT OR IGNORE` when
-     * app-macos migrates.
+     * `(device_id, seq)` is the primary key and `insertEvent` is
+     * `INSERT OR IGNORE`, so a colliding seq is not an error — the row is
+     * silently discarded. That is exactly what a fresh
+     * `FocusSessionTracker(deviceId)` produced on every launch: its counter
+     * restarts at 0, and the real NDJSON on this Mac shows it, seq running
+     * 12, 13, 14, then 0, 1 where the app was restarted. Under NDJSON nothing
+     * read seq so it cost nothing; against the store it would have dropped
+     * every event of every session after the first, invisibly.
+     *
+     * So [append] stamps the seq itself rather than trusting its caller. This
+     * is still exposed because the Screen Time importer wants a starting
+     * point for a batch it builds before handing it over.
      */
-    fun nextSeq(): Long =
-        (eventFiles()
-            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
-            .maxOfOrNull { it.seq } ?: -1L) + 1L
-
-    /** Append a batch, advancing the import watermark to the newest event taken. */
-    fun appendImported(events: List<FocusEvent>) {
-        if (events.isEmpty()) return
-        events.forEach(::append)
-        setImportWatermark(events.maxOf { it.startedAtMs + it.durationMs })
+    fun nextSeq(): Long {
+        if (seqCursor < 0L) seqCursor = (events.maxOfOrNull { it.seq } ?: -1L) + 1L
+        return seqCursor
     }
 
-    /** Append a closed session. */
+    /** Append a batch, advancing the import watermark to the newest event taken. */
+    fun appendImported(imported: List<FocusEvent>) {
+        if (imported.isEmpty()) return
+        imported.forEach(::append)
+        setImportWatermark(imported.maxOf { it.startedAtMs + it.durationMs })
+    }
+
+    /**
+     * Append a closed session.
+     *
+     * The seq and the device are stamped here, at the single point where an
+     * event enters the store, because they are properties of *this store's*
+     * sequence rather than of whoever built the event. See [nextSeq].
+     */
     fun append(event: FocusEvent) {
-        // An event can span midnight; it is written to the file for the day it
-        // STARTED in, and split correctly at read time by bucket timestamp.
-        val day = UtcDay.dayOf(event.startedAtMs)
-        File(root, "events-$day.ndjson")
-            .appendText(json.encodeToString(FocusEvent.serializer(), event) + "\n")
+        val stamped = event.copy(seq = nextSeq(), deviceId = device)
+        seqCursor++
+        store.insertEvent(stamped)
+        events += stamped
     }
 
     /**
@@ -191,10 +249,10 @@ class UsageStore(
     /**
      * Everything this device holds, as an export payload (M5).
      *
-     * Rollups are derived from the stored events rather than read from a
-     * rollup table, because app-macos is still on the NDJSON cache — the
-     * events ARE the record here. When this moves to LumenStore the source
-     * changes and the shape does not.
+     * Rollups are derived from the stored events rather than read from the
+     * rollup table, because nothing on macOS writes that table yet — the
+     * events ARE the record here. When the rollup tables are populated the
+     * source changes and the shape does not.
      *
      * deviceKeys is empty: macOS has no keychain yet, so there is no sync
      * identity to carry. An empty list is the honest answer; inventing a
@@ -256,12 +314,6 @@ class UsageStore(
     }
 
     /**
-     * Per-app totals for [dayUtc], largest first.
-     *
-     * Reads the day's file plus the previous day's, because a session that
-     * started before midnight contributes buckets to today.
-     */
-    /**
      * The display timezone: the zone whose midnight defines a Lumen day.
      *
      * Stored rather than read from the OS so that every device agrees on the
@@ -278,30 +330,21 @@ class UsageStore(
     /**
      * Per-app totals for a LOCAL day — the day the user actually lived.
      *
-     * Events are filed by the UTC day they started in, and a local day
-     * straddles at most two of those, so both are read and then filtered by
-     * the local-day window. Bucketing to the minute first means an event
-     * spanning local midnight is split across the two days rather than
-     * assigned wholesale to one, which is the same rule the UTC path used.
+     * Bucketing to the minute first means an event spanning local midnight is
+     * split across the two days rather than assigned wholesale to one, which
+     * is the same rule the UTC path used.
      */
     fun totalsFor(dayLocal: String, zone: TimeZone = displayZone()): List<AppTotal> {
         val startMs = LocalDay.startOfDayMs(dayLocal, zone)
         val endMs = LocalDay.endOfDayMs(dayLocal, zone)
 
-        // Events are filed by the UTC day they STARTED in, and a session can
-        // run past midnight — so a day's usage can live in a file named for
-        // the day before it. Read one extra UTC day back, or a session that
-        // began at 23:58 and ran into this day is invisible.
-        val utcDays = linkedSetOf(
-            UtcDay.dayOf(startMs - 86_400_000L),
-            UtcDay.dayOf(startMs),
-            UtcDay.dayOf(endMs - 1),
-        )
-        val events = utcDays.flatMap { readEvents(it) }
-
         val byApp = mutableMapOf<String, Long>()
         for (e in events) {
-            // Also filtered on READ, so history recorded before this existed
+            // A session that began before this day can still run into it, and
+            // one that began inside it can run past the end — so the test is
+            // overlap, not containment.
+            if (e.startedAtMs >= endMs || e.startedAtMs + e.durationMs <= startMs) continue
+            // Filtered on READ, so history recorded before this filter existed
             // is corrected without rewriting or deleting a single event. The
             // raw record stays intact; only what we count changes.
             if (MacSystemUi.isSystemUi(e.appKey)) continue
@@ -343,16 +386,14 @@ class UsageStore(
     /**
      * Every local day that has any recorded usage, oldest first.
      *
-     * Derived from the event files rather than a stored index, so it cannot
-     * drift out of step with what is actually on disk.
+     * Derived from the events rather than a stored index, so it cannot drift
+     * out of step with what is actually recorded.
      */
     fun recordedDays(zone: TimeZone = displayZone()): List<String> =
-        eventFiles()
-            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
+        events
             .map { LocalDay.dayOf(it.startedAtMs, zone) }
             .distinct()
             .sorted()
-            .toList()
 
     /** The local day containing [epochMs]. */
     fun dayOf(epochMs: Long, zone: TimeZone = displayZone()): String = LocalDay.dayOf(epochMs, zone)
@@ -372,7 +413,7 @@ class UsageStore(
         val todayStart = LocalDay.startOfDayMs(today, zone)
         // Walk back by calendar date, not by subtracting 24h: DST days are 23
         // or 25 hours long and fixed arithmetic drifts across one.
-        val windowStart = LocalDay.startOfDayMs(today, zone) - (days.toLong() + 1) * 86_400_000L
+        val windowStart = LocalDay.startOfDayMs(today, zone) - (days.toLong() + 1) * MILLIS_PER_DAY
         val allDays = LocalDay.daysBetween(windowStart, todayStart, zone).takeLast(days)
         return allDays.map { day ->
             DayTotal(
@@ -383,22 +424,11 @@ class UsageStore(
         }
     }
 
-    private fun eventFiles(): Sequence<File> =
-        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
-            .asSequence()
-
-    private fun readEvents(dayUtc: String): List<FocusEvent> {
-        val f = File(root, "events-$dayUtc.ndjson")
-        if (!f.exists()) return emptyList()
-        return f.readLines().mapNotNull { line ->
-            if (line.isBlank()) return@mapNotNull null
-            // A single corrupt line must not lose the whole day's history.
-            runCatching { json.decodeFromString(FocusEvent.serializer(), line) }.getOrNull()
-        }
-    }
-
     companion object {
         private const val MILLIS_PER_DAY = 86_400_000L
+
+        /** Beside the rest of the app's data, so a backup of one is a backup of all. */
+        internal const val DB_NAME = "lumen.db"
 
         fun defaultRoot(): File = File(
             System.getProperty("user.home"),
@@ -406,5 +436,3 @@ class UsageStore(
         )
     }
 }
-
-/** A single app's total for a day. [displayName] falls back to the bundle id. */
