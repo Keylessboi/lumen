@@ -184,3 +184,51 @@ class LsAppInfoParsingTest {
         assertNull(parse("\"CFBundleIdentifier\"=\"com.apple.Safari\n", "CFBundleIdentifier"))
     }
 }
+
+class RuntimeBundleIdTest {
+
+    private fun key(bundleId: String, name: String?) =
+        LsAppInfoReader.appKeyFor(bundleId, name).value
+
+    @Test
+    fun `a packaged app keys on its bundle id, unchanged`() {
+        // The common path. AppKey is what every stored row joins on, so this
+        // must stay byte-identical or history stops matching live tracking.
+        assertEquals("com.apple.Safari", key("com.apple.Safari", "Safari"))
+        assertEquals("dev.lumen.macos", key("dev.lumen.macos", "Lumen"))
+        assertEquals("com.apple.Safari", key("com.apple.Safari", null))
+    }
+
+    @Test
+    fun `two JVM apps get distinct keys instead of merging into one row`() {
+        // The bug: lsappinfo reports the JDK's bundle id for every unpackaged
+        // Java app, so they collapsed into a single row named after whichever
+        // was seen first.
+        val gradle = key("net.java.openjdk.java", "GradleDaemon")
+        val lumen = key("net.java.openjdk.java", "MainKt")
+        assertTrue(gradle != lumen, "distinct Java apps must not share an AppKey")
+        assertEquals("net.java.openjdk.java/GradleDaemon", gradle)
+        assertEquals("net.java.openjdk.java/MainKt", lumen)
+    }
+
+    @Test
+    fun `the same JVM app keys identically across observations`() {
+        assertEquals(key("net.java.openjdk.java", "MainKt"), key("net.java.openjdk.java", "MainKt"))
+    }
+
+    @Test
+    fun `an unnamed runtime process is left lumped rather than split arbitrarily`() {
+        // One lumpy row is bad; inventing a distinction we cannot observe is
+        // worse, because it would fragment a single app across restarts.
+        assertEquals("net.java.openjdk.java", key("net.java.openjdk.java", null))
+        assertEquals("net.java.openjdk.java", key("net.java.openjdk.java", "   "))
+    }
+
+    @Test
+    fun `the composite key cannot collide with a real bundle id`() {
+        // '/' is not legal in a bundle id, so no real app can ever produce
+        // the composite form.
+        assertTrue(key("net.java.openjdk.java", "MainKt").contains('/'))
+        assertTrue(!key("com.apple.Safari", "Safari").contains('/'))
+    }
+}
