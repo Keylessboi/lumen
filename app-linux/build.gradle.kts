@@ -24,6 +24,8 @@ kotlin {
                 implementation(compose.foundation)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.datetime)
+                // X25519 keypair generation for LinuxKeychain (M4 E2EE).
+                implementation(libs.bouncycastle)
             }
         }
         val desktopTest by getting {
