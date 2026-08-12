@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -101,10 +102,13 @@ fun CategoryBar(
                 Spacer(Modifier.weight(1f))
                 Text(
                     formatDuration(slice.totalMs),
+                    modifier = Modifier.width(LumenTheme.TimeColumnWidth),
+                    textAlign = TextAlign.End,
                     style = TextStyle(
                         color = LumenTheme.TextSecondary,
                         fontSize = 12.sp,
                         fontFamily = LumenTheme.TabularFigures,
+                        fontFeatureSettings = "tnum",
                     ),
                 )
             }
