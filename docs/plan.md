@@ -22,7 +22,7 @@ Two agents build Lumen in parallel. This contract stops interference: every file
 | `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
 | `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
 | `app-macos/**` | **Agent B** | macOS app. lsappinfo collector, Screen Time (knowledgeC) importer, local store, menu-bar + packaging, MacosKeychain. UI imports `:ui`. |
-| `ui/**` (shared) | **shared** | Shared Compose Multiplatform UI: `Theme.kt` is pinned to Agent A (it is the executable copy of the A-owned `docs/design-spec.md`) — A may edit it directly, B files issues/PRs against it. Everything else under `ui/` is either-agent with the other's review in the PR body (discussion #21, option 3). |
+| `ui/**` | **Agent B** | Shared Compose Multiplatform UI — design tokens, screens, charts; the single implementation all three apps render (discussion #21). Moved from shared to B by LO. **`docs/design-spec.md` remains Agent A's**: the spec is the authority, `:ui` is B's implementation of it. A may read, file issues, and hold B to the spec; A does not edit `ui/`. |
 | `marketing/**` | **Agent B** | Marketing kit deliverables (campaign assets, claims ledger) per LO's assignment and `docs/skills/create-marketing-kit.md`. A may read, never edit. |
 | `tools/registry-builder/**` | **Agent B** | Category registry dataset tooling (M6 re-cut, discussion #12). |
 | `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier (M4 re-cut, discussion #12). |

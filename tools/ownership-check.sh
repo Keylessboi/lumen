@@ -43,6 +43,12 @@ ZONE_A=(
   "docs/non-goals.md"
 )
 ZONE_B=(
+  # Shared Compose Multiplatform UI. Moved from SHARED to Agent B by LO
+  # ("we will take the ui"), reversing the Theme.kt pin from discussion #21.
+  # docs/design-spec.md remains Agent A's: the spec is still the authority,
+  # :ui is the implementation of it that B owns. A renders something the spec
+  # does not say -> that is a B bug, and A should file it.
+  "ui"
   "core/src/commonTest"
   "app-macos"
   "marketing"
@@ -66,15 +72,6 @@ SHARED=(
   "LICENSE"
   ".gitignore"
   "docs"
-  "ui"
-)
-
-# Files with a single authority even inside a shared directory: shared zone
-# membership is overridden by an exact pinned match. `ui/Theme.kt` is the
-# executable copy of `docs/design-spec.md`, which is Agent A's; B may read it
-# and file issues against it, never edit it (discussion #21).
-PINNED_A=(
-  "ui/src/commonMain/kotlin/dev/lumen/ui/Theme.kt"
 )
 
 # Module-level build files are shared infra too (they configure targets for
@@ -104,12 +101,6 @@ violations=()
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
-  if in_zone "$file" "${PINNED_A[@]}"; then
-    if [ "$AGENT" != "A" ]; then
-      violations+=("$file")
-    fi
-    continue
-  fi
   if in_zone "$file" "${SHARED[@]}" || is_module_build_file "$file"; then
     continue
   fi
