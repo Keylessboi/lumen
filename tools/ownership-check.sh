@@ -72,6 +72,11 @@ SHARED=(
   "LICENSE"
   ".gitignore"
   "docs"
+  # Generated from tools/registry-builder (Agent B's curation source) —
+  # a generated file has no independent authorship, so it ships with its
+  # source rather than forcing the curation PR to carry a core/ file it
+  # cannot own (agreed with B, M4 discussion).
+  "core/src/commonMain/kotlin/dev/lumen/core/category/GeneratedRegistry.kt"
 )
 
 # Module-level build files are shared infra too (they configure targets for
