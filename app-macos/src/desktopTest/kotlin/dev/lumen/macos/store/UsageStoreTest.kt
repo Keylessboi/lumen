@@ -6,6 +6,7 @@ import kotlinx.datetime.TimeZone
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
+import dev.lumen.macos.keychain.MacosKeychain
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
@@ -15,6 +16,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class UsageStoreTest {
+
+    /** A keychain that lives and dies with the test. */
+    private class InMemorySecrets : MacosKeychain.SecretStore {
+        private var entry: String? = null
+        override fun read(account: String): String? = entry
+        override fun write(account: String, value: String) { entry = value }
+    }
+
 
     private val tmp: File = Files.createTempDirectory("lumen-store-test").toFile()
     private val store = UsageStore(tmp)
@@ -142,6 +151,45 @@ class UsageStoreTest {
     @Test
     fun `an empty day has no totals`() {
         assertEquals(emptyList(), store.totalsFor("2026-01-01"))
+    }
+
+    /**
+     * `deviceKeys` exported empty for as long as macOS had no keychain: a
+     * restore could bring back a month of history but not the identity it was
+     * recorded under, so the restored Mac joined a sync as a stranger.
+     */
+    @Test
+    fun `an export carries this device's sync identity`() {
+        val keychain = MacosKeychain(InMemorySecrets())
+        val store = UsageStore(tmp, keychain = keychain)
+        store.append(event("com.apple.Safari", noon, 60_000))
+
+        val exported = store.exportPayload().deviceKeys.single()
+
+        assertEquals(store.deviceId(), exported.deviceId)
+        assertTrue(exported.publicKey.contentEquals(keychain.deviceKeyPair().publicKey))
+        assertTrue(exported.privateKey.contentEquals(keychain.deviceKeyPair().privateKeyHandle))
+        assertTrue(exported.displayName.isNotBlank(), "the backup cannot say which device it came from")
+    }
+
+    /**
+     * A keychain that cannot be reached must not fail the backup. An empty
+     * list makes the restore visibly incomplete; a placeholder key would make
+     * it look complete and be a lie.
+     */
+    @Test
+    fun `a backup still happens when the keychain is unreachable`() {
+        val unreachable = object : MacosKeychain.SecretStore {
+            override fun read(account: String) = null
+            override fun write(account: String, value: String) = error("no keychain")
+        }
+        val store = UsageStore(tmp, keychain = MacosKeychain(unreachable))
+        store.append(event("com.apple.Safari", noon, 60_000))
+
+        val payload = store.exportPayload()
+
+        assertEquals(emptyList(), payload.deviceKeys)
+        assertTrue(payload.rollups.isNotEmpty(), "the history was lost with the identity")
     }
 
     @Test
