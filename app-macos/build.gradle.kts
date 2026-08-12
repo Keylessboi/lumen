@@ -64,7 +64,20 @@ compose.desktop {
                 // Dmg rejects a MAJOR of 0 — the app version stays 0.1.0 while
                 // the package version satisfies the macOS packaging rule.
                 packageVersion = "1.0.0"
+                // TCC lists apps by bundle identity. Packaged, Lumen appears as
+                // "Lumen" in Privacy & Security; run from Gradle the process is
+                // a bare JVM and shows up as "java". Granting Full Disk Access
+                // therefore requires the packaged app, not `:app-macos:run`.
                 bundleID = "dev.lumen.macos"
+                infoPlist {
+                    // Menu-bar app: no Dock icon, no app switcher entry. The
+                    // window is opened on demand from the menu, which is the
+                    // shape the tray-first design needs.
+                    extraKeysRawXml = """
+                        <key>LSUIElement</key>
+                        <true/>
+                    """.trimIndent()
+                }
             }
         }
     }

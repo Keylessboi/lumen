@@ -36,6 +36,33 @@ class LsAppInfoCollectorTest {
             runner = FakeReader(observations.toList()),
         )
 
+    /**
+     * Lumen counts its own screen time, like iOS Screen Time counts the
+     * Screen Time app and Digital Wellbeing counts itself (LO's decision,
+     * locked in `docs/design-spec.md`; the self-exclusion seam was reverted in
+     * `248446f`). Hiding it would be the flattering lie a mirror must not
+     * tell, and `app-macos/README.md` says so out loud.
+     *
+     * This test exists because the reverted position is the *non-obvious* one:
+     * "a screen-time app shouldn't count itself" reads as an obvious bug fix,
+     * and it was already implemented once. Without a test, the next person to
+     * notice re-adds the filter and nothing objects.
+     */
+    @Test
+    fun `lumen's own window is reported like any other app`() = runBlocking {
+        val changes = collector(
+            app("com.apple.Safari"),
+            app("dev.lumen.macos", "Lumen"),
+            app("com.googlecode.iterm2"),
+        ).focusChanges().take(3).toList()
+
+        assertEquals(
+            listOf("com.apple.Safari", "dev.lumen.macos", "com.googlecode.iterm2"),
+            changes.map { it.appKey.value },
+            "Lumen must appear in its own numbers — no self-exclusion",
+        )
+    }
+
     @Test
     fun `emits one change per distinct app`() = runBlocking {
         val changes = collector(
