@@ -12,26 +12,28 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.lumen.app.collector.HyprlandCollector
 import dev.lumen.app.names.DesktopEntryNameResolver
+import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.collector.AppNameResolver
+import dev.lumen.core.model.AppKey
+import dev.lumen.core.model.AppTotal
 import dev.lumen.core.model.DeviceId
+import dev.lumen.core.model.FocusEvent
+import dev.lumen.core.model.Setting
+import dev.lumen.core.rollup.RollupEngine
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
-import dev.lumen.core.model.AppTotal
+import dev.lumen.core.store.JvmLumenStore
 import dev.lumen.ui.TodayScreen
 import kotlinx.coroutines.delay
+import java.io.File
 
 /**
  * Lumen for Linux.
  *
- * Uses the SHARED `:ui` TodayScreen — the same screen macOS and Android
- * render. It previously drew its own dev-harness list with hardcoded hex
- * colours copied out of `docs/design-spec.md`, which is exactly the drift the
- * shared module exists to prevent: three hand-copies of the design language,
- * differing the moment one is edited.
- *
- * Storage is still in-memory ([DayAccumulator]) pending the `LumenStore`
- * wiring at M2 — but the surface the user sees is the real one, not a
- * placeholder that quietly becomes the product.
+ * Uses the SHARED `:ui` TodayScreen and persists through [JvmLumenStore]
+ * (SQLite). The collector seam reports focus transitions; [FocusSessionTracker]
+ * derives durations; [RollupEngine] buckets and rolls them up; the store
+ * survives restarts.
  */
 fun main() = application {
     Window(
@@ -41,30 +43,36 @@ fun main() = application {
     ) {
         val collector = remember { HyprlandCollector() }
         val nameResolver: AppNameResolver = remember { DesktopEntryNameResolver() }
-        val tracker = remember { FocusSessionTracker(DeviceId()) }
+        val store = remember { openStore() }
+        val deviceId = remember { resolveDeviceId(store) }
+        val tracker = remember { FocusSessionTracker(deviceId) }
         val day = remember { DayAccumulator() }
 
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
+        var storedTotalMs by remember { mutableStateOf(0L) }
         var liveApp by remember { mutableStateOf<String?>(null) }
         var liveSinceMs by remember { mutableStateOf(0L) }
         var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
         fun render() {
-            totals = day.snapshot().map { (appKey, ms) ->
+            val today = UtcDay.today()
+            val rollups = store.rollupsForDay(deviceId, today)
+            storedTotalMs = rollups.sumOf { it.totalMs }
+            totals = rollups.sortedByDescending { it.totalMs }.map { rollup ->
                 AppTotal(
-                    appKey = appKey,
-                    // Resolver first: it knows the desktop-entry name, which
-                    // is friendlier than the WM class the collector reports.
-                    displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
-                    totalMs = ms,
+                    appKey = rollup.appKey,
+                    displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
+                    totalMs = rollup.totalMs,
                 )
             }
         }
 
         LaunchedEffect(Unit) {
+            render()
             collector.focusChanges().collect { change ->
                 day.remember(change)
                 tracker.onChange(change)?.let { closed ->
+                    persistEvent(store, closed)
                     day.add(closed)
                     render()
                 }
@@ -86,11 +94,42 @@ fun main() = application {
 
         TodayScreen(
             totals = totals,
-            totalMs = day.totalMs() + liveMs,
+            totalMs = storedTotalMs + liveMs,
             liveApp = liveApp,
             reducedMotion = reducedMotion,
         )
     }
+}
+
+private fun openStore(): JvmLumenStore {
+    val dataDir = File(System.getProperty("user.home"), ".local/share/lumen")
+    return JvmLumenStore.open(File(dataDir, "lumen.db"))
+}
+
+private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
+    val existing = store.setting("device_id")
+    if (existing != null) return DeviceId(String(existing.value, Charsets.UTF_8))
+    val id = DeviceId()
+    store.upsertSetting(
+        Setting(
+            key = "device_id",
+            value = id.value.toByteArray(Charsets.UTF_8),
+            updatedAtMs = System.currentTimeMillis(),
+            updatedDayUtc = UtcDay.today(),
+            deviceId = id,
+        ),
+    )
+    return id
+}
+
+private fun persistEvent(store: JvmLumenStore, event: FocusEvent) {
+    store.insertEvent(event)
+    RollupEngine.bucket(event).forEach(store::insertBucket)
+    val today = UtcDay.dayOf(event.startedAtMs)
+    val dayStart = UtcDay.boundary(today)
+    val dayEnd = dayStart + 86_400_000
+    val buckets = store.bucketsForRange(event.deviceId, dayStart, dayEnd)
+    RollupEngine.rollup(event.deviceId, today, buckets).forEach(store::upsertRollup)
 }
 
 /**
