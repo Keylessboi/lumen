@@ -21,7 +21,7 @@ Two agents build Lumen in parallel. This contract stops interference: every file
 | `transport-xmpp/**` | **Agent A** | XMPP client, IBR, MAM, embedded provider list. |
 | `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
 | `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
-| `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). NSWorkspace frontmost-app collector + MacosKeychain. Seam designed at M0. |
+| `app-macos/**` | **Agent B** | macOS app. lsappinfo collector, Screen Time (knowledgeC) importer, local store, menu-bar + packaging, MacosKeychain. UI imports `:ui`. |
 | `ui/**` (shared) | **shared** | Shared Compose Multiplatform UI: `Theme.kt` is pinned to Agent A (it is the executable copy of the A-owned `docs/design-spec.md`) — A may edit it directly, B files issues/PRs against it. Everything else under `ui/` is either-agent with the other's review in the PR body (discussion #21, option 3). |
 | `marketing/**` | **Agent B** | Marketing kit deliverables (campaign assets, claims ledger) per LO's assignment and `docs/skills/create-marketing-kit.md`. A may read, never edit. |
 | `tools/registry-builder/**` | **Agent B** | Category registry dataset tooling (M6 re-cut, discussion #12). |
