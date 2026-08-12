@@ -52,6 +52,13 @@ fun TodayScreen(
     totalMs: Long,
     liveApp: String?,
     reducedMotion: Boolean,
+    /**
+     * Hide the "Now: <app>" line entirely. Android passes false: the app
+     * only shows this screen while Lumen itself is foreground, so the
+     * indicator would always read "Now: Lumen" — noise, not information.
+     * (LO directive; added by Agent A, awaiting B review since ui/ is B's.)
+     */
+    showLiveApp: Boolean = true,
     historyState: HistoryState = HistoryState.Hidden,
     /**
      * Recent per-day totals for the trend view (chart 3 of the three in
@@ -100,10 +107,12 @@ fun TodayScreen(
 
         Spacer(Modifier.height(2.dp))
 
-        Text(
-            if (liveApp != null) "Now: $liveApp" else "Waiting for the first app switch",
-            style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
-        )
+        if (showLiveApp) {
+            Text(
+                if (liveApp != null) "Now: $liveApp" else "Waiting for the first app switch",
+                style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
 

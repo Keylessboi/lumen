@@ -17,6 +17,20 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Android 11+ package visibility: without a <queries> declaration the
+         PackageManager only returns Lumen itself, system packages, and
+         packages it has intent filters for. Every other installed app throws
+         NameNotFoundException, so backfilled history renders as raw package
+         names (com.foss.aihub) instead of labels ("AI Hub"). A screen-time
+         tracker must resolve ANY app's label, so it must be visible to all
+         launcher apps. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="Lumen"
