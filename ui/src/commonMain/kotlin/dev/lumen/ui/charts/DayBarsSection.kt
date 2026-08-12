@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.lumen.ui.AppTotal
+import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.LumenTheme
 import dev.lumen.ui.formatDuration
 

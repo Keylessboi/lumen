@@ -16,7 +16,7 @@ import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
-import dev.lumen.ui.AppTotal
+import dev.lumen.core.model.AppTotal
 import dev.lumen.ui.TodayScreen
 import kotlinx.coroutines.delay
 
