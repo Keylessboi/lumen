@@ -64,10 +64,11 @@ fun main() = runBlocking {
 
     // Phase 3: rollup per app for today.
     val today = UtcDay.today()
-    buckets.groupBy { it.appKey }.forEach { (app, bs) ->
-        val rollup = RollupEngine.rollup(deviceId, today, bs)
-        store.upsertRollup(rollup)
-    }
+    // One call with every bucket: rollup() returns the whole day now. The
+    // old per-app grouping is what made the single-return signature look
+    // correct, and it is why this harness stayed green while #15 was real —
+    // it never passed more than one app in, so it never hit the bug.
+    RollupEngine.rollup(deviceId, today, buckets).forEach(store::upsertRollup)
     val rollups = store.rollupsForDay(deviceId, today)
     println("rollups for $today: ${rollups.size}")
     rollups.forEach { println("  ${it.appKey.value}: ${it.totalMs} ms") }

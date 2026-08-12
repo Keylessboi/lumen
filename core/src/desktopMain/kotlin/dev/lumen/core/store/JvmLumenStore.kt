@@ -215,13 +215,54 @@ class JvmLumenStore private constructor(
     }
 
     companion object {
-        /** Open (or create) the database at [dbFile]. */
+        /**
+         * Open (or create) the database at [dbFile].
+         *
+         * Creates the schema only on a fresh database and migrates an older
+         * one. Calling `Schema.create` unconditionally — as this did —
+         * succeeds exactly once and then throws `table devices already
+         * exists` on every subsequent launch, because SQLDelight emits plain
+         * `CREATE TABLE`. Nothing caught it: the contract tests and the
+         * driver's own round-trips all use [inMemory], which is fresh every
+         * time, and no app persisted through this seam yet.
+         *
+         * `user_version` is SQLite's own schema-version pragma and is what
+         * SQLDelight's migration machinery expects to drive.
+         */
         fun open(dbFile: File): JvmLumenStore {
             dbFile.parentFile?.mkdirs()
             val driver = JdbcSqliteDriver(
                 url = "jdbc:sqlite:${dbFile.absolutePath}",
             )
-            LumenDatabase.Schema.create(driver)
+            val current = driver.executeQuery(
+                identifier = null,
+                sql = "PRAGMA user_version",
+                mapper = { cursor ->
+                    app.cash.sqldelight.db.QueryResult.Value(
+                        if (cursor.next().value) cursor.getLong(0) ?: 0L else 0L,
+                    )
+                },
+                parameters = 0,
+            ).value
+
+            val target = LumenDatabase.Schema.version
+            when {
+                current == 0L -> {
+                    LumenDatabase.Schema.create(driver).value
+                    driver.execute(null, "PRAGMA user_version = $target", 0)
+                }
+                current < target -> {
+                    LumenDatabase.Schema.migrate(driver, current, target).value
+                    driver.execute(null, "PRAGMA user_version = $target", 0)
+                }
+                // current > target: a newer Lumen wrote this file. Opening it
+                // read-write would corrupt data the older schema cannot
+                // represent, so refuse rather than guess.
+                current > target -> error(
+                    "database schema v$current is newer than this build understands (v$target)",
+                )
+            }
+
             val db = LumenDatabase(driver)
             return JvmLumenStore(db, db.lumenDatabaseQueries)
         }
