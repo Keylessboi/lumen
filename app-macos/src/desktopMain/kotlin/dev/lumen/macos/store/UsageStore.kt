@@ -133,8 +133,26 @@ class UsageStore(
             .filter { it.isNotBlank() && it !in known }
             .distinct()
             .forEach { bundleId ->
-                appNameForBundleId(bundleId)?.let { rememberName(AppKey(bundleId), it) }
+                val name = devSelfName(bundleId) ?: appNameForBundleId(bundleId)
+                name?.let { rememberName(AppKey(bundleId), it) }
             }
+    }
+
+    /**
+     * Lumen's own identity while running unpackaged.
+     *
+     * A dev build is a bare JVM, so lsappinfo reports the JDK's bundle id and
+     * the main class as the name — which is why Lumen appeared in its own
+     * list as "MainKt". The packaged .app has a real bundle id and does not
+     * hit this. Naming it here rather than special-casing the collector keeps
+     * the collector reporting what it observes.
+     */
+    private fun devSelfName(bundleId: String): String? {
+        if (!bundleId.startsWith("net.java.openjdk.java/")) return null
+        val mainClass = System.getProperty("sun.java.command")
+            ?.substringBefore(' ')
+            ?.substringAfterLast('.')
+        return if (bundleId.substringAfter('/') == mainClass) "Lumen" else null
     }
 
     /** Spotlight lookup: bundle id -> the app's display name, or null. */
@@ -156,6 +174,14 @@ class UsageStore(
 
     /** Remember a human-facing app name. Display only, never synced. */
     fun rememberName(appKey: AppKey, displayName: String?) {
+        // Our own dev process reports its main class ("MainKt"). Override at
+        // the single point every name enters the store, so the live collector
+        // and the import path cannot disagree about what Lumen is called.
+        val resolved = devSelfName(appKey.value) ?: displayName
+        return rememberResolvedName(appKey, resolved)
+    }
+
+    private fun rememberResolvedName(appKey: AppKey, displayName: String?) {
         if (displayName.isNullOrBlank()) return
         val f = File(root, "app-names.tsv")
         val existing = names()
