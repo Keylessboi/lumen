@@ -42,11 +42,17 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(libs.sqldelight.jvm.driver)
+                // Argon2id for the M5 export (docs/e2ee.md §7).
+                implementation(libs.bouncycastle)
             }
         }
         val androidMain by getting {
             dependencies {
                 implementation(libs.sqldelight.android.driver)
+                // Same Argon2id implementation as desktop, so an export
+                // written on one opens on the other. A platform-specific KDF
+                // would be a compatibility bug waiting for its first user.
+                implementation(libs.bouncycastle)
             }
         }
     }
