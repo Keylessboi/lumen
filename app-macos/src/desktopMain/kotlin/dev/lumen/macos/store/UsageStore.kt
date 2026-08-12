@@ -1,6 +1,9 @@
 package dev.lumen.macos.store
 
 import dev.lumen.core.clock.LocalDay
+import dev.lumen.core.export.ExportPayload
+import dev.lumen.core.model.AppDayRollup
+import dev.lumen.core.model.Setting
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.macos.names.SpotlightNameResolver
 import dev.lumen.core.clock.UtcDay
@@ -182,6 +185,43 @@ class UsageStore(
         // Written as an explicit tombstone rather than by rewriting the file:
         // "" is not a category name, so it reads back as absent.
         File(root, "category-overrides.tsv").appendText("${appKey.value}\t\n")
+    }
+
+    /**
+     * Everything this device holds, as an export payload (M5).
+     *
+     * Rollups are derived from the stored events rather than read from a
+     * rollup table, because app-macos is still on the NDJSON cache — the
+     * events ARE the record here. When this moves to LumenStore the source
+     * changes and the shape does not.
+     *
+     * deviceKeys is empty: macOS has no keychain yet, so there is no sync
+     * identity to carry. An empty list is the honest answer; inventing a
+     * placeholder key would make a restore look complete when it is not.
+     */
+    fun exportPayload(zone: TimeZone = displayZone()): ExportPayload {
+        val rollups = recordedDays(zone).flatMap { day ->
+            totalsFor(day, zone).map { total ->
+                AppDayRollup(
+                    deviceId = deviceId(),
+                    dayUtc = day,
+                    appKey = total.appKey,
+                    totalMs = total.totalMs,
+                )
+            }
+        }
+        val settings = overrides()
+            .filterValues { it.isNotBlank() }
+            .map { (key, value) ->
+                Setting(
+                    key = "category.override.$key",
+                    value = value.encodeToByteArray(),
+                    updatedAtMs = 0L,
+                    updatedDayUtc = LocalDay.today(zone),
+                    deviceId = deviceId(),
+                )
+            }
+        return ExportPayload(rollups = rollups, settings = settings)
     }
 
     /** Remember a human-facing app name. Display only, never synced. */
