@@ -22,6 +22,8 @@ Two agents build Lumen in parallel. This contract stops interference: every file
 | `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
 | `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
 | `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). NSWorkspace frontmost-app collector + MacosKeychain. Seam designed at M0. |
+| `ui/**` (shared) | **shared** | Shared Compose Multiplatform UI: `Theme.kt` is pinned to Agent A (it is the executable copy of the A-owned `docs/design-spec.md`) — A may edit it directly, B files issues/PRs against it. Everything else under `ui/` is either-agent with the other's review in the PR body (discussion #21, option 3). |
+| `marketing/**` | **Agent B** | Marketing kit deliverables (campaign assets, claims ledger) per LO's assignment and `docs/skills/create-marketing-kit.md`. A may read, never edit. |
 | `tools/registry-builder/**` | **Agent B** | Category registry dataset tooling (M6 re-cut, discussion #12). |
 | `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier (M4 re-cut, discussion #12). |
 | `docs/design-spec.md` | **Agent A** | Week-1 design spec owner. Agent B may *read* and file issues, never edit. |
@@ -37,6 +39,8 @@ These are the *only* files Agent B consumes from Agent A (and vice-versa). They 
 1. **`core/src/commonMain` public API** — `SyncTransport`, `E2EE` seam, data model types, `rollup` engine signature. **Frozen at M1.** Agent B writes androidMain against this API. Changes after freeze require a tag-bump PR; both agents review it.
 2. **`E2EE.kt` envelope format** — frozen at M4 (G3). The ciphertext envelope is a wire contract; `docs/e2ee.md` is its normative spec.
 3. **SQLite schema** — frozen at M1. Both agents' UI reads it; schema migrations are additive-only and owned by Agent A.
+
+**Post-freeze amendments** bump the minor version: the pattern is *tag.M → fix → tag.M+1* (e.g. `M1.1`), announced in a `freeze-review` Discussion with a 24h review window before the fix lands. The amended tag replaces the prior one as the freeze reference — there is never more than one live freeze tag per surface (discussion #22).
 
 ### Git protocol (how they share one repo)
 
@@ -147,11 +151,14 @@ lumen/
 ├── README.md, LICENSE (AGPL-3.0), .gitignore
 ├── docs/  design-spec.md · data-model.md · e2ee.md · providers.md · non-goals.md
 ├── core/  Kotlin commonMain: model/ store/ rollup/ clock/ category/ sync/ (SyncTransport.kt, SyncEngine.kt, envelope.kt) crypto/ (E2EE.kt, keychain.kt) + androidMain keystore + desktopMain libsecret + commonTest
+├── ui/    shared Compose Multiplatform commonMain (no platform code): Theme.kt (executable design-spec) · TodayScreen.kt · HistoryBanner.kt · charts/ — consumed by all three apps
 ├── transport-xmpp/  JVM module (android+desktop): IBR (XEP-0077), providers/ static list, mam/
-├── app-linux/  CMP desktop: collector/{hyprland,sway,x11}/ ui/ charts/
-├── app-android/  CMP android: collector/usagestats/ ui/ hardening/
+├── app-linux/  CMP desktop: collector/{hyprland,sway,x11}/ keychain/ packaging/ — UI imports :ui
+├── app-android/  CMP android: collector/usagestats/ hardening/ — UI imports :ui
 └── tools/  registry-builder/ · sync-test-server/
 ```
+
+App modules hold what is genuinely per-platform — collector wiring, keychain, packaging, tray/notification integration, and the window or Activity host. All screens and charts live once in `ui/` (discussion #21).
 
 ## SQLite Schema
 

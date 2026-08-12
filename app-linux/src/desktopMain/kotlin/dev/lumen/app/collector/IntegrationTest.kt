@@ -65,8 +65,8 @@ fun main() = runBlocking {
     // Phase 3: rollup per app for today.
     val today = UtcDay.today()
     buckets.groupBy { it.appKey }.forEach { (app, bs) ->
-        val rollup = RollupEngine.rollup(deviceId, today, bs)
-        store.upsertRollup(rollup)
+        val rollups = RollupEngine.rollup(deviceId, today, bs)
+        rollups.forEach { store.upsertRollup(it) }
     }
     val rollups = store.rollupsForDay(deviceId, today)
     println("rollups for $today: ${rollups.size}")

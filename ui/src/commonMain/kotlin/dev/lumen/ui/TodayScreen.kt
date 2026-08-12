@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.lumen.core.model.AppTotal
 
 /**
  * Today — the only screen that decides whether a user stays
