@@ -20,10 +20,15 @@ import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.Setting
 import dev.lumen.core.rollup.RollupEngine
+import dev.lumen.core.category.DayView
+import dev.lumen.core.category.sessionCategoryEngine
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.core.store.JvmLumenStore
 import dev.lumen.ui.TodayScreen
+import dev.lumen.ui.charts.CategorySlice
+import dev.lumen.ui.charts.DayDetail
+import dev.lumen.ui.charts.DayTotal
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -54,6 +59,44 @@ fun main() = application {
         var liveApp by remember { mutableStateOf<String?>(null) }
         var liveSinceMs by remember { mutableStateOf(0L) }
         var now by remember { mutableStateOf(System.currentTimeMillis()) }
+        var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
+        var recentDays by remember { mutableStateOf(emptyList<DayTotal>()) }
+        var averageMs by remember { mutableStateOf<Long?>(null) }
+        var selectedDay by remember { mutableStateOf<String?>(null) }
+        var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
+
+        // Shared derivation, so the strip and the app list are the same
+        // numbers grouped and can never disagree. Session overrides for now:
+        // the registry half is real, and nothing here pretends a user's
+        // choice survives a restart until the store carries them.
+        val dayView = remember { DayView(sessionCategoryEngine()) }
+
+        fun decorate(rows: List<AppTotal>): List<AppTotal> = dayView.rows(rows)
+
+        fun slices(rows: List<AppTotal>): List<CategorySlice> =
+            dayView.categoryNames(rows).map { (name, ms) -> CategorySlice(name, ms) }
+
+        /** Per-day totals for the trend chart, straight from stored rollups. */
+        fun loadHistory() {
+            val today = UtcDay.today()
+            val days = (HISTORY_WINDOW_DAYS - 1 downTo 0).map { back ->
+                UtcDay.dayOf(UtcDay.boundary(today) - back * MILLIS_PER_DAY)
+            }
+            recentDays = days.map { d ->
+                DayTotal(
+                    dayUtc = d,
+                    totalMs = store.rollupsForDay(deviceId, d)
+                        .filter { it.appKey.value.isNotBlank() }
+                        .sumOf { it.totalMs },
+                    isToday = d == today,
+                )
+            }
+            // Complete days only: a partial today drags the mean down every
+            // morning and lets it recover every evening, which looks like a
+            // trend and is an artefact of the clock.
+            val complete = recentDays.filterNot { it.isToday }
+            averageMs = if (complete.isEmpty()) null else complete.sumOf { it.totalMs } / complete.size
+        }
 
         fun render() {
             val today = UtcDay.today()
@@ -71,6 +114,8 @@ fun main() = application {
                         totalMs = rollup.totalMs,
                     )
                 }
+            totals = decorate(totals)
+            categories = slices(totals)
         }
 
         // The app list must tick with the live session, not freeze until the
@@ -94,10 +139,13 @@ fun main() = application {
                         totalMs = ms,
                     )
                 }
+            totals = decorate(totals)
+            categories = slices(totals)
         }
 
         LaunchedEffect(Unit) {
             render()
+            loadHistory()
             collector.focusChanges().collect { change ->
                 day.remember(change)
                 tracker.onChange(change)?.let { closed ->
@@ -128,6 +176,35 @@ fun main() = application {
 
         TodayScreen(
             totals = totals,
+            categories = categories,
+            recentDays = recentDays,
+            averageMs = averageMs,
+            selectedDay = selectedDay,
+            dayDetail = dayDetail,
+            onSelectDay = { d ->
+                if (d == selectedDay) {
+                    selectedDay = null
+                    dayDetail = null
+                } else {
+                    selectedDay = d
+                    val rows = decorate(
+                        store.rollupsForDay(deviceId, d)
+                            .filter { it.appKey.value.isNotBlank() }
+                            .map {
+                                AppTotal(
+                                    appKey = it.appKey,
+                                    displayName = nameResolver.resolve(it.appKey) ?: it.appKey.value,
+                                    totalMs = it.totalMs,
+                                )
+                            },
+                    )
+                    dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
+                }
+            },
+            onClearDaySelection = {
+                selectedDay = null
+                dayDetail = null
+            },
             totalMs = storedTotalMs + liveMs,
             liveApp = liveApp,
             reducedMotion = reducedMotion,
@@ -190,3 +267,8 @@ private fun reducedMotionEnabled(): Boolean = runCatching {
         out == "false"
     }
 }.getOrDefault(false)
+
+/** Chart 3 in docs/design-spec.md is "7/30-day bars"; 7 is the calm default. */
+private const val HISTORY_WINDOW_DAYS = 7
+
+private const val MILLIS_PER_DAY = 86_400_000L
