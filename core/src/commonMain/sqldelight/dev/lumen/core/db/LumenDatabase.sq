@@ -12,15 +12,15 @@ CREATE TABLE devices (
 );
 
 CREATE TABLE events (                       -- pruned ~30 days
-    seq              INTEGER PRIMARY KEY,   -- per-device monotonic
     device_id        TEXT NOT NULL REFERENCES devices(device_id),
+    seq              INTEGER NOT NULL,      -- per-device monotonic (device B's seq 1 is independent of device A's seq 1)
     app_key          TEXT NOT NULL,
     title_hash       TEXT,                  -- truncated/hashed, NEVER synced
     started_at_ms    INTEGER NOT NULL,
     duration_ms      INTEGER NOT NULL,
     category         TEXT,                  -- denormalized snapshot
     sync_state       INTEGER NOT NULL DEFAULT 0,  -- 0 local, 1 acked, 2 conflict
-    UNIQUE(device_id, seq)
+    PRIMARY KEY (device_id, seq)
 );
 
 CREATE INDEX idx_events_device_seq ON events(device_id, seq);
