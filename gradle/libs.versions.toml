@@ -21,6 +21,10 @@ libsodium = "0.2.0"
 # an export is a once-in-a-while operation, not a hot path.
 bouncycastle = "1.78.1"
 junit = "4.13.2"
+# Smack: the JVM XMPP client stack (M4 transport). Pure Java, no native
+# deps — fits the same "no per-arch binaries in the distribution" rule that
+# chose Bouncy Castle over a JNA libsodium.
+smack = "4.4.8"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -36,6 +40,17 @@ sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 libsodium-jni = { module = "org.abstractj.kalium:kalium", version.ref = "libsodium" }
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 junit = { module = "junit:junit", version.ref = "junit" }
+# Smack (M4 transport): core + TCP + extensions (MAM/IBR live in extensions).
+smack-core = { module = "org.igniterealtime.smack:smack-core", version.ref = "smack" }
+smack-tcp = { module = "org.igniterealtime.smack:smack-tcp", version.ref = "smack" }
+smack-extensions = { module = "org.igniterealtime.smack:smack-extensions", version.ref = "smack" }
+# StAX backend: smack-xmlparser is the SPI interface only; without a concrete
+# parser (xpp3 or stax) Smack fails at init with "No XmlPullParserFactory
+# registered with Service Provider Interface".
+smack-xmlparser-stax = { module = "org.igniterealtime.smack:smack-xmlparser-stax", version.ref = "smack" }
+# MiniDNS resolver: without it DNSUtil.getDNSResolver() is null and TCP
+# connect fails with an NPE before any packet is sent.
+smack-resolver-minidns = { module = "org.igniterealtime.smack:smack-resolver-minidns", version.ref = "smack" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }
 
