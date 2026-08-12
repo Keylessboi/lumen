@@ -55,6 +55,7 @@ fun main() = application {
 
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var storedTotalMs by remember { mutableStateOf(0L) }
+        var storedTotals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
         var liveApp by remember { mutableStateOf<String?>(null) }
         var liveSinceMs by remember { mutableStateOf(0L) }
@@ -114,15 +115,19 @@ fun main() = application {
                         totalMs = rollup.totalMs,
                     )
                 }
+            storedTotals = totals
             totals = decorate(totals)
             categories = slices(totals)
         }
 
         // The app list must tick with the live session, not freeze until the
         // next focus change — otherwise the top total climbs every second
-        // while the rows beneath stay static.
+        // while the rows beneath stay static. The base MUST come from the
+        // stored rollups, never from `totals` (which already carries the
+        // previous live merge — re-merging on top of it compounds the live
+        // time quadratically and inflates the day).
         fun refreshTotals(liveMs: Long) {
-            val base = totals.associate { it.appKey to it.totalMs }.toMutableMap()
+            val base = storedTotals.associate { it.appKey to it.totalMs }.toMutableMap()
             val liveKey = liveAppKey
             if (liveKey != null && liveMs > 0) {
                 base.merge(liveKey, liveMs, Long::plus)

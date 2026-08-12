@@ -10,19 +10,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.lumen.app.collector.UsageStatsCollector
 import dev.lumen.app.names.PackageManagerNameResolver
-import dev.lumen.core.clock.LocalDay
-import dev.lumen.core.collector.AppNameResolver
-import dev.lumen.core.collector.PermissionState
-import dev.lumen.core.model.DeviceId
 import dev.lumen.core.category.DayView
 import dev.lumen.core.category.sessionCategoryEngine
-import dev.lumen.core.session.DayAccumulator
-import dev.lumen.core.session.FocusSessionTracker
+import dev.lumen.core.clock.UtcDay
+import dev.lumen.core.collector.AppNameResolver
+import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
+import dev.lumen.core.model.DeviceId
+import dev.lumen.core.model.FocusEvent
+import dev.lumen.core.model.Setting
+import dev.lumen.core.rollup.RollupEngine
+import dev.lumen.core.session.DayAccumulator
+import dev.lumen.core.session.FocusSessionTracker
+import dev.lumen.core.store.AndroidLumenStore
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.charts.CategorySlice
+import dev.lumen.ui.charts.DayDetail
+import dev.lumen.ui.charts.DayTotal
 import kotlinx.coroutines.delay
 
 /**
@@ -30,11 +36,11 @@ import kotlinx.coroutines.delay
  *
  * Renders the SHARED `:ui` TodayScreen — byte-for-byte the same composable
  * macOS and Linux draw, so the three platforms cannot drift apart visually.
- * It previously drew its own two-line scaffold with hex colours copied out of
- * `docs/design-spec.md`, which is the drift the shared module exists to stop.
  *
- * Storage is in-memory ([DayAccumulator]) pending `LumenStore` at M3. The
- * surface is the real one; only what is behind it is provisional.
+ * Storage is [AndroidLumenStore] (SQLite via AndroidSqliteDriver). Events,
+ * buckets and rollups persist across launches, so history survives restarts
+ * and the full UI surface (categories, recent-days trend, day drilldown)
+ * renders exactly as on desktop and macOS.
  */
 class MainActivity : ComponentActivity() {
 
@@ -61,39 +67,84 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val collector = UsageStatsCollector(applicationContext)
         val nameResolver: AppNameResolver = PackageManagerNameResolver(applicationContext)
+        val store = AndroidLumenStore.open(applicationContext)
+        val deviceId = resolveDeviceId(store)
 
         setContent {
-            val tracker = remember { FocusSessionTracker(DeviceId()) }
+            val tracker = remember { FocusSessionTracker(deviceId) }
             val day = remember { DayAccumulator() }
 
             var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
+            var storedTotalMs by remember { mutableStateOf(0L) }
+            var storedTotals by remember { mutableStateOf(emptyList<AppTotal>()) }
             var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
-
-            // The same shared derivation macOS and Linux use, so the strip is
-            // exactly the app list grouped and the three platforms cannot
-            // drift. Session overrides: the registry half is real, and nothing
-            // pretends a choice survives a restart until the store is wired.
-            val dayView = remember { DayView(sessionCategoryEngine()) }
+            var recentDays by remember { mutableStateOf(emptyList<DayTotal>()) }
+            var averageMs by remember { mutableStateOf<Long?>(null) }
+            var selectedDay by remember { mutableStateOf<String?>(null) }
+            var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
             var liveAppKey by remember { mutableStateOf<AppKey?>(null) }
             var liveAppName by remember { mutableStateOf<String?>(null) }
             var liveSinceMs by remember { mutableStateOf(0L) }
             var now by remember { mutableStateOf(System.currentTimeMillis()) }
             val permission = remember { collector.permissionState() }
 
+            // Shared derivation (same as macOS and Linux): the category strip
+            // is exactly the app list grouped, so they cannot disagree.
+            val dayView = remember { DayView(sessionCategoryEngine()) }
+
+            fun render() {
+                val today = UtcDay.today()
+                val rollups = store.rollupsForDay(deviceId, today)
+                // storedTotalMs must exclude the idle key: locked screen time
+                // is not screen time, and the UI total feeds off this.
+                storedTotalMs = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
+                val list = rollups
+                    .filter { it.appKey.value.isNotBlank() }
+                    .sortedByDescending { it.totalMs }
+                    .map { rollup ->
+                        AppTotal(
+                            appKey = rollup.appKey,
+                            displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
+                            totalMs = rollup.totalMs,
+                        )
+                    }
+                storedTotals = list
+                totals = dayView.rows(list)
+                categories = dayView.categoryNames(list)
+                    .map { (name, ms) -> CategorySlice(name, ms) }
+
+                // Recent days for the trend chart, in the same UTC-day
+                // arithmetic macOS and Linux use — a local-zone daysBetween
+                // here produced a day labelled as future when the device zone
+                // is ahead of UTC, because isToday compared against the UTC
+                // day while the list carried local days.
+                val days = (HISTORY_WINDOW_DAYS - 1 downTo 0).map { back ->
+                    UtcDay.dayOf(UtcDay.boundary(today) - back * MILLIS_PER_DAY)
+                }
+                val dayTotals = days.map { dayUtc ->
+                    val dayStart = UtcDay.boundary(dayUtc)
+                    val dayMs = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                        .filter { it.appKey.value.isNotBlank() }
+                        .sumOf { it.activeMs }
+                    DayTotal(dayUtc = dayUtc, totalMs = dayMs, isToday = dayUtc == today)
+                }
+                recentDays = dayTotals
+                val completed = dayTotals.filter { !it.isToday && it.totalMs > 0 }
+                averageMs = if (completed.isNotEmpty()) completed.sumOf { it.totalMs } / completed.size else null
+            }
+
             // The app list must tick with the live session, not freeze until
-            // the next focus change. Without this the top total climbs every
-            // second while the rows beneath stay static, which reads as a
-            // broken screen even though the data is fine.
+            // the next focus change. The base MUST come from the stored
+            // rollups, never from `totals` (which already carries the previous
+            // live merge — re-merging on top of it compounds the live time
+            // quadratically and inflates the day).
             fun refreshTotals(liveMs: Long) {
-                val base = day.snapshot().associate { it.first to it.second }.toMutableMap()
+                val base = storedTotals.associate { it.appKey to it.totalMs }.toMutableMap()
                 val liveKey = liveAppKey
                 if (liveKey != null && liveMs > 0) {
                     base.merge(liveKey, liveMs, Long::plus)
                 }
                 totals = base.entries
-                    // AppKey("") is the screen-locked/idle transition, not an
-                    // app. It is already inside totalMs; surfacing it as the
-                    // largest row would present "lock screen" as an app.
                     .filter { it.key.value.isNotBlank() }
                     .sortedByDescending { it.value }
                     .map { (appKey, ms) ->
@@ -103,9 +154,15 @@ class MainActivity : ComponentActivity() {
                             totalMs = ms,
                         )
                     }
-                totals = dayView.rows(totals)
-                categories = dayView.categoryNames(totals)
-                    .map { (name, ms) -> CategorySlice(name, ms) }
+            }
+
+            fun persistEvent(event: FocusEvent) {
+                store.insertEvent(event)
+                RollupEngine.bucket(event).forEach(store::insertBucket)
+                val today = UtcDay.dayOf(event.startedAtMs)
+                val dayStart = UtcDay.boundary(today)
+                val buckets = store.bucketsForRange(event.deviceId, dayStart, dayStart + 86_400_000)
+                RollupEngine.rollup(event.deviceId, today, buckets).forEach(store::upsertRollup)
             }
 
             LaunchedEffect(permission) {
@@ -115,31 +172,37 @@ class MainActivity : ComponentActivity() {
                 // idle user.
                 if (permission !is PermissionState.Granted) return@LaunchedEffect
 
+                render()
+
                 // Android retains usage events for ~3 days (the collector's
                 // backfillHorizonMs). The live stream only sees events from
                 // this point on, so without a backfill the Today screen would
                 // start at zero every launch even though the user has been
                 // using the phone for hours. UsageStatsManager is the same
                 // backend Digital Wellbeing reads — this is how the app shows
-                // the real day.
-                val zone = LocalDay.zoneOf(null)
-                val today = LocalDay.today(zone)
-                val sinceMs = LocalDay.startOfDayMs(today, zone)
+                // the real day. Backfill the FULL horizon, not just today:
+                // the trend chart reads past days, and a today-only query
+                // leaves them at zero on a fresh install.
+                val sinceMs = System.currentTimeMillis() - BACKFILL_DAYS * 86_400_000
                 collector.backfill(sinceMs).forEach { change ->
                     day.remember(change)
                     tracker.onChange(change)?.let { closed ->
+                        persistEvent(closed)
                         day.add(closed)
                     }
                     liveAppKey = change.appKey
                     liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
                     liveSinceMs = change.atMs
                 }
+                render()
                 refreshTotals(0)
 
                 collector.focusChanges().collect { change ->
                     day.remember(change)
                     tracker.onChange(change)?.let { closed ->
+                        persistEvent(closed)
                         day.add(closed)
+                        render()
                         refreshTotals(0)
                     }
                     liveAppKey = change.appKey
@@ -163,15 +226,15 @@ class MainActivity : ComponentActivity() {
             // previous app's session, but they are not screen time: a phone
             // locked from 2am to 11am would otherwise show an 9-hour "day".
             fun visibleTotalMs(): Long =
-                day.snapshot().filter { it.first.value.isNotBlank() }.sumOf { it.second }
-
-            val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
-                (now - liveSinceMs).coerceAtLeast(0) else 0
+                storedTotalMs + if (liveAppKey != null && liveAppKey!!.value.isNotBlank()) {
+                    if (liveSinceMs > 0) (now - liveSinceMs).coerceAtLeast(0) else 0
+                } else {
+                    0
+                }
 
             TodayScreen(
                 totals = totals,
-                categories = categories,
-                totalMs = visibleTotalMs() + liveMs,
+                totalMs = visibleTotalMs(),
                 liveApp = null,
                 showLiveApp = false,
                 reducedMotion = remember { reducedMotionEnabled() },
@@ -182,7 +245,66 @@ class MainActivity : ComponentActivity() {
                     )
                     is PermissionState.Unsupported -> HistoryState.Message(permission.reason)
                 },
+                categories = categories,
+                recentDays = recentDays,
+                averageMs = averageMs,
+                selectedDay = selectedDay,
+                dayDetail = dayDetail,
+                onSelectDay = { dayUtc ->
+                    if (dayUtc == selectedDay) {
+                        selectedDay = null
+                        dayDetail = null
+                    } else {
+                        selectedDay = dayUtc
+                        val dayStart = UtcDay.boundary(dayUtc)
+                        val dayTotals = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                            .filter { it.appKey.value.isNotBlank() }
+                            .groupBy { it.appKey }
+                            .map { (appKey, bs) ->
+                                AppTotal(
+                                    appKey = appKey,
+                                    displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
+                                    totalMs = bs.sumOf { it.activeMs },
+                                )
+                            }
+                            .sortedByDescending { it.totalMs }
+                        dayDetail = DayDetail(
+                            dayUtc = dayUtc,
+                            totalMs = dayTotals.sumOf { it.totalMs },
+                            totals = dayTotals,
+                        )
+                    }
+                },
+                onClearDaySelection = {
+                    selectedDay = null
+                    dayDetail = null
+                },
             )
         }
+    }
+
+    private fun resolveDeviceId(store: AndroidLumenStore): DeviceId {
+        val existing = store.setting("device_id")
+        if (existing != null) return DeviceId(String(existing.value, Charsets.UTF_8))
+        val id = DeviceId()
+        store.upsertSetting(
+            Setting(
+                key = "device_id",
+                value = id.value.toByteArray(Charsets.UTF_8),
+                updatedAtMs = System.currentTimeMillis(),
+                updatedDayUtc = UtcDay.today(),
+                deviceId = id,
+            ),
+        )
+        return id
+    }
+
+    companion object {
+        /** Trend chart window, matching the Linux app's HISTORY_WINDOW_DAYS. */
+        private const val HISTORY_WINDOW_DAYS = 7
+        private const val MILLIS_PER_DAY = 86_400_000L
+
+        /** How many days of usage history to import at startup. */
+        private const val BACKFILL_DAYS = 3
     }
 }
