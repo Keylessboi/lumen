@@ -1,6 +1,7 @@
 package dev.lumen.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontFamily
 
 /**
@@ -83,6 +84,17 @@ object LumenTheme {
         "Utilities" -> CategoryPalette[7]     // light neutral
         else -> Uncategorized                 // grey; not a judgement
     }
+
+    /**
+     * Width of every right-hand time column.
+     *
+     * The category legend, the app rows and the day-detail panel each ended
+     * their numbers at a slightly different x. Three near-misses read as
+     * sloppiness rather than as three separate lists — one width makes the
+     * whole column line up, and tabular figures keep it lined up as the
+     * digits change.
+     */
+    val TimeColumnWidth = 64.dp
 
     /** The neutral for time Lumen cannot categorise. */
     val Uncategorized = Color(0xFF5A6272)

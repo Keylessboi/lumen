@@ -238,6 +238,22 @@ fun main() = application {
             title = "Lumen",
             state = rememberWindowState(size = DpSize(760.dp, 620.dp)),
         ) {
+            // A bright system title bar above a near-black app is the single
+            // loudest thing wrong with the window: docs/design-spec.md makes
+            // dark the default and calls the palette "ink-near-black", and a
+            // white strip across the top undoes that before the user reads a
+            // number. macOS honours these AWT client properties on the native
+            // window — full-size content view with a transparent title bar, so
+            // the app's own background runs edge to edge and the traffic
+            // lights float on it.
+            LaunchedEffect(window) {
+                runCatching {
+                    window.rootPane.putClientProperty("apple.awt.fullWindowContent", true)
+                    window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
+                    // The title would otherwise draw over our own content.
+                    window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+                }
+            }
             TodayScreen(
                 totals = totals,
                 categories = categories,

@@ -56,15 +56,7 @@ fun DayBarsSection(
 
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                title,
-                style = TextStyle(
-                    color = LumenTheme.TextSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.2.sp,
-                ),
-            )
+            dev.lumen.ui.SectionLabel(title)
             Spacer(Modifier.weight(1f))
             // Anchors the weekday axis to real dates: weekdays alone say
             // which days, never which week.

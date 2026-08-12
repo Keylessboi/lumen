@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontSynthesis
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,17 +74,9 @@ fun TodayScreen(
         Modifier
             .fillMaxSize()
             .background(LumenTheme.Background)
-            .padding(horizontal = 32.dp, vertical = 28.dp)
+            .padding(start = 32.dp, end = 32.dp, top = 44.dp, bottom = 28.dp)
     ) {
-        Text(
-            "Today",
-            style = TextStyle(
-                color = LumenTheme.TextSecondary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 1.2.sp,
-            ),
-        )
+        SectionLabel("TODAY")
 
         Spacer(Modifier.height(6.dp))
 
@@ -123,14 +116,14 @@ fun TodayScreen(
                 "Nothing recorded yet. Switch between a couple of apps and they'll appear here.",
                 style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
             )
-            // Same reason as the weight above: keep the trend section at the
-            // bottom even with no rows at all.
-            Spacer(Modifier.weight(1f))
         } else {
             if (categories.isNotEmpty()) {
                 CategoryBar(categories)
                 Spacer(Modifier.height(22.dp))
             }
+
+            SectionLabel("APPS")
+            Spacer(Modifier.height(10.dp))
 
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
             // Resolved for the whole visible set so two rows are not the same
@@ -145,7 +138,11 @@ fun TodayScreen(
                 // apps had been used, so the same screen sat in a different
                 // place depending on the day — and a chart that moves is one
                 // you have to re-find every time you look.
-                modifier = Modifier.weight(1f),
+                // weight(1f, fill = false) plus a max height: the list takes
+                // only the room it needs, and the trend section sits under it
+                // rather than after a void. Pinning it to the bottom of a tall
+                // window meant one app produced a screen that was mostly gap.
+                modifier = Modifier.weight(1f, fill = false),
             ) {
                 items(totals, key = { it.appKey.value }) { row ->
                     AppRow(
@@ -158,11 +155,16 @@ fun TodayScreen(
             }
         }
 
+        // Absorbs leftover height so the trend view stays bottom-anchored,
+        // but only AFTER the list has taken what it needs — so a light day
+        // shows a short list and a short gap, not a short list and a chasm.
+        Spacer(Modifier.weight(1f))
+
         // Trend view last: today is what the screen is for, history is
         // context underneath it. Absent when there is none to show, so a
         // fresh install has no empty frame.
         if (recentDays.isNotEmpty()) {
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
             DayBarsSection(
                 title = "RECENT DAYS",
                 days = recentDays,
@@ -174,6 +176,20 @@ fun TodayScreen(
             )
         }
     }
+}
+
+/** Section heading. One definition so every section matches exactly. */
+@Composable
+internal fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = TextStyle(
+            color = LumenTheme.TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 1.4.sp,
+        ),
+    )
 }
 
 @Composable
@@ -229,7 +245,8 @@ private fun AppRow(
                 fontFamily = LumenTheme.TabularFigures,
                 fontFeatureSettings = "tnum",
             ),
-            modifier = Modifier.width(72.dp),
+            modifier = Modifier.width(LumenTheme.TimeColumnWidth),
+            textAlign = TextAlign.End,
         )
     }
 }
