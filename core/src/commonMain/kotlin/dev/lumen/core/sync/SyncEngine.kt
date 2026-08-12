@@ -88,9 +88,17 @@ class SyncEngine(
         val applied = mutableListOf<SyncRecord>()
 
         // Per-device last-seen seq for gap/jump/replay detection. The
-        // store's sync_watermark is per-device, so the watermark is read
-        // from the store per record (not just for self).
+        // store's lastAckedSeq default of 0 means "no row" — but 0 is also
+        // a legitimate acked seq, so a first-contact device (no events in
+        // the store) must be treated as -1, or its first record (seq 0) is
+        // misread as a replay and silently dropped.
         val lastSeenSeq = mutableMapOf<String, Long>()
+        records.forEach { r ->
+            if (r.deviceId.value !in lastSeenSeq) {
+                val hasLocalEvents = store.eventsAfter(r.deviceId, Long.MIN_VALUE).isNotEmpty()
+                lastSeenSeq[r.deviceId.value] = if (hasLocalEvents) store.lastAckedSeq(r.deviceId) else -1L
+            }
+        }
 
         for (record in records) {
             val key = record.deviceId.value to record.seq
@@ -100,8 +108,7 @@ class SyncEngine(
             // something. Surface it, don't converge silently. First contact
             // with a device (no watermark yet) is NOT a gap — seq starts at
             // 0 or 1 and prev is -1 by convention.
-            val storedPrev = store.lastAckedSeq(record.deviceId)
-            val prev = maxOf(lastSeenSeq[record.deviceId.value] ?: -1L, storedPrev)
+            val prev = lastSeenSeq[record.deviceId.value] ?: -1L
             if (record.seq <= prev) {
                 warnings += "replay: ${record.deviceId.value} seq ${record.seq} <= watermark $prev"
                 continue

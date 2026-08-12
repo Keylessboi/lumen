@@ -34,6 +34,7 @@ fi
 ZONE_A=(
   "core/src/commonMain"
   "core/src/desktopMain"
+  "core/src/desktopTest"
   "core/src/androidMain"
   "transport-xmpp"
   "app-linux"
@@ -101,7 +102,9 @@ in_zone() {
   return 1
 }
 
-changed=$(git diff --name-only "${BASE}...${HEAD}")
+# Only files present in the head (added/copied/modified/renamed): a deletion
+# is a path leaving the tree, so moves between zones don't false-positive.
+changed=$(git diff --name-only --diff-filter=ACMRT "${BASE}...${HEAD}")
 violations=()
 
 while IFS= read -r file; do

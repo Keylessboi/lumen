@@ -185,10 +185,7 @@ class AndroidLumenStore private constructor(
     }
 
     override fun lastAckedSeq(deviceId: DeviceId): Long =
-        // -1, not 0: a missing row means "nothing acked". Returning 0 makes
-        // the first record (seq 0) look like a replay on the receive side
-        // (`seq 0 <= watermark 0`), silently dropping every first sync.
-        queries.selectWatermark(deviceId.value).executeAsOneOrNull() ?: -1L
+        queries.selectWatermark(deviceId.value).executeAsOneOrNull() ?: 0L
 
     override fun setAckedSeq(deviceId: DeviceId, seq: Long) {
         queries.upsertWatermark(deviceId.value, seq)
