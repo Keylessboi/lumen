@@ -87,8 +87,8 @@ class JvmLumenStoreTest {
         assertEquals(42_000, readBuckets[0].activeMs)
 
         // Rollup derived through the engine, then stored.
-        val rollup = RollupEngine.rollup(device, day, listOf(bucket))
-        store.upsertRollup(rollup)
+        val rollups = RollupEngine.rollup(device, day, listOf(bucket))
+        rollups.forEach { store.upsertRollup(it) }
         val readRollup = store.rollupsForDay(device, day)
         assertEquals(1, readRollup.size)
         assertEquals(42_000, readRollup[0].totalMs)

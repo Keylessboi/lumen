@@ -40,8 +40,8 @@ object RollupEngine {
         return buckets
     }
 
-    /** Sum buckets into a per-app-per-day rollup. */
-    fun rollup(deviceId: DeviceId, dayUtc: String, buckets: List<MinuteBucket>): AppDayRollup {
+    /** Sum buckets into per-app-per-day rollups. Returns one rollup per distinct app. */
+    fun rollup(deviceId: DeviceId, dayUtc: String, buckets: List<MinuteBucket>): List<AppDayRollup> {
         val byApp = buckets.groupBy { it.appKey }
         return byApp.map { (app, appBuckets) ->
             AppDayRollup(
@@ -51,7 +51,7 @@ object RollupEngine {
                 totalMs = appBuckets.sumOf { it.activeMs },
                 category = null, // category is a separate lookup, never baked into rollup math
             )
-        }.maxByOrNull { it.totalMs } ?: AppDayRollup(deviceId, dayUtc, AppKey(""), 0)
+        }
     }
 
     /** Aggregate a list of rollups into a single day total (all apps). */
