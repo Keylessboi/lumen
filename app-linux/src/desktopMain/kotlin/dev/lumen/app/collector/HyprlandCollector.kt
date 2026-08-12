@@ -79,6 +79,12 @@ class HyprlandCollector(
 
             val buf = ByteBuffer.allocate(64 * 1024)
             val sb = StringBuilder()
+            // The seam requires emitting only on CHANGE. Hyprland re-sends
+            // activewindow on workspace switches and on focus returning to
+            // the same window, so without this the engine sees "switched to
+            // Firefox" repeatedly while the user never left Firefox.
+            var lastKey: AppKey? = null
+            var lastIdle = false
 
             while (true) {
                 buf.clear()
@@ -91,8 +97,20 @@ class HyprlandCollector(
                         while (sb.indexOf("\n").also { idx = it } >= 0) {
                             val line = sb.substring(0, idx).trim()
                             sb.delete(0, idx + 1)
-                            parseEvent(line)?.let { emit(it) }
+                            val change = parseEvent(line)
+                            if (change != null &&
+                                (change.appKey != lastKey || change.isIdle != lastIdle)
+                            ) {
+                                lastKey = change.appKey
+                                lastIdle = change.isIdle
+                                emit(change)
+                            }
                         }
+                        // A socket that emits a very long line, or garbage
+                        // with no newline, would otherwise grow this buffer
+                        // until the process dies. Nothing legitimate from
+                        // Hyprland is anywhere near this long.
+                        if (sb.length > MAX_PENDING_CHARS) sb.setLength(0)
                     }
                     n == 0 -> kotlinx.coroutines.delay(50) // idle, keep polling
                     else -> break // EOF
@@ -160,6 +178,14 @@ class HyprlandCollector(
     }.getOrNull()
 
     companion object {
+        /**
+         * Cap on unparsed socket text held in memory. Hyprland lines are tens
+         * of bytes; this is four orders of magnitude of headroom, and it
+         * bounds a stream that would otherwise grow forever if a newline
+         * never arrived.
+         */
+        private const val MAX_PENDING_CHARS = 1 shl 20
+
         fun defaultSocketPath(): Path {
             val sig = System.getenv("HYPRLAND_INSTANCE_SIGNATURE")
                 ?: throw IllegalStateException("HYPRLAND_INSTANCE_SIGNATURE not set")

@@ -42,7 +42,23 @@ object LumenTheme {
         Color(0xFFBFC6D4), // light neutral (stands in for Okabe-Ito black)
     )
 
-    fun categoryColor(index: Int): Color = CategoryPalette[index % CategoryPalette.size]
+    /**
+     * A stable colour for an app, derived from its key rather than its
+     * position in a list.
+     *
+     * Position-based colouring means an app CHANGES COLOUR as its ranking
+     * moves during the day — Terminal is orange until it overtakes Claude and
+     * then it is blue. Colour reads as identity, so that is the chart telling
+     * the user something untrue about which row is which, which
+     * `docs/design-spec.md` puts on the uninstall side of the line.
+     *
+     * Keyed on the AppKey string, so the same app is the same colour in the
+     * Today list, the day-detail panel, and across restarts. `String.hashCode`
+     * is a specified algorithm, so this is stable across runs and platforms
+     * rather than merely stable within one process.
+     */
+    fun colorForKey(key: String): Color =
+        CategoryPalette[((key.hashCode().toLong() and 0x7fffffffL) % CategoryPalette.size).toInt()]
 
     /**
      * Tabular figures — non-negotiable per the spec. Proportional numerals

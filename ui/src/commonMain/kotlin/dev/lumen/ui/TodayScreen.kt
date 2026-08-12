@@ -137,7 +137,7 @@ fun TodayScreen(
                     AppRow(
                         row = row,
                         fraction = row.totalMs.toFloat() / max.toFloat(),
-                        color = LumenTheme.categoryColor(totals.indexOf(row)),
+                        color = LumenTheme.colorForKey(row.appKey.value),
                         reducedMotion = reducedMotion,
                     )
                 }

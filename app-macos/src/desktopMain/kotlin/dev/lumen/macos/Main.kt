@@ -231,14 +231,52 @@ fun main() = application {
                     }
                 },
                 onImport = {
-                    val since = store.importWatermark().takeIf { it > 0L }
-                        ?: (System.currentTimeMillis() - DEFAULT_IMPORT_WINDOW_MS)
-                    // Stop where Lumen's own tracking begins. Apple recorded
-                    // the same apps over the same period, so importing past
-                    // this point counts that time twice.
-                    val until = store.earliestEventMs() ?: System.currentTimeMillis()
-                    val result = KnowledgeCImporter(deviceId)
-                        .import(sinceMs = since, untilMs = until, startSeq = store.nextSeq())
+                    val now = System.currentTimeMillis()
+                    val floor = store.importWatermark().takeIf { it > 0L }
+                        ?: (now - DEFAULT_IMPORT_WINDOW_MS)
+
+                    // Two importable ranges, not one. Apple recorded the same
+                    // apps Lumen did, so anything Lumen already covered would
+                    // double-count — but the periods OUTSIDE that coverage are
+                    // exactly what an import is for:
+                    //
+                    //   [floor, firstEverEvent)  history from before Lumen ran
+                    //   [lastEvent, now)         the gap since it last ran
+                    //
+                    // Only the first range existed before, so a user who quit
+                    // Lumen for a week and came back could never recover that
+                    // week: `until` was pinned to their first-ever event, so
+                    // the range was empty and the UI said "no new history" on
+                    // a Mac that had a week of it.
+                    val ranges = buildList {
+                        val earliest = store.earliestEventMs()
+                        val latest = store.latestEventMs()
+                        if (earliest == null || latest == null) {
+                            add(floor to now)
+                        } else {
+                            if (floor < earliest) add(floor to earliest)
+                            if (latest < now) add(maxOf(latest, floor) to now)
+                        }
+                    }.filter { (from, to) -> to > from }
+
+                    var seq = store.nextSeq()
+                    val importer = KnowledgeCImporter(deviceId)
+                    val collected = mutableListOf<dev.lumen.core.model.FocusEvent>()
+                    var failure: KnowledgeCImporter.Result? = null
+                    for ((from, to) in ranges) {
+                        when (val r = importer.import(sinceMs = from, untilMs = to, startSeq = seq)) {
+                            is KnowledgeCImporter.Result.Imported -> {
+                                collected += r.events
+                                seq += r.events.size
+                            }
+                            // Any non-success is reported as-is rather than
+                            // averaged with a partial success: a permission
+                            // error must not be hidden by another range
+                            // happening to return rows.
+                            else -> failure = r
+                        }
+                    }
+                    val result = failure ?: KnowledgeCImporter.Result.Imported(collected)
                     history = when (val r = result) {
                         is KnowledgeCImporter.Result.Imported -> {
                             store.appendImported(r.events)

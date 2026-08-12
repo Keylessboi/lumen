@@ -6,11 +6,19 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
+ * MANUAL HARNESS — needs a real Hyprland session, so it is not a @Test.
+ *
+ * Was in `desktopMain` with a `fun main()`, which meant this live focus stream
+ * harness was compiled into the shipped application. Moved to the test
+ * source set: it still runs on demand, and it no longer travels to users.
+ * Run with `runLiveHarness()` from a scratch main or a debugger.
+ *
+
  * Live test harness — runs the Hyprland collector against the real
  * compositor socket and prints the first focus changes. Not part of the
  * shipped app; exists to prove the collector on real hardware.
  */
-fun main() = runBlocking {
+fun runLiveHarness() = runBlocking {
     val collector = HyprlandCollector()
     println("permission: ${collector.permissionState()}")
     println("capabilities: $collector")
