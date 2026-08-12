@@ -37,3 +37,6 @@ Thumbs.db
 .env.*
 *.pem
 *.key
+
+# agent watcher local state
+.agent-inbox/.saw

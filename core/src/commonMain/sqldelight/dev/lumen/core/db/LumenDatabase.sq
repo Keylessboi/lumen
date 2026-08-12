@@ -1,0 +1,104 @@
+-- Lumen database schema — FROZEN at M1.
+-- Normative spec: docs/data-model.md. Migrations are additive-only.
+-- Any change to this file after M1 requires a tag-bump PR reviewed by
+-- both agents (docs/plan.md, Two-Agent Execution Contract).
+
+CREATE TABLE devices (
+    device_id        TEXT PRIMARY KEY,      -- uuid v4
+    display_name     TEXT NOT NULL,
+    public_key_x25519 BLOB NOT NULL,
+    created_at_ms    INTEGER NOT NULL,
+    last_seen_ms     INTEGER
+);
+
+CREATE TABLE events (                       -- pruned ~30 days
+    seq              INTEGER PRIMARY KEY,   -- per-device monotonic
+    device_id        TEXT NOT NULL REFERENCES devices(device_id),
+    app_key          TEXT NOT NULL,
+    title_hash       TEXT,                  -- truncated/hashed, NEVER synced
+    started_at_ms    INTEGER NOT NULL,
+    duration_ms      INTEGER NOT NULL,
+    category         TEXT,                  -- denormalized snapshot
+    sync_state       INTEGER NOT NULL DEFAULT 0,  -- 0 local, 1 acked, 2 conflict
+    UNIQUE(device_id, seq)
+);
+
+CREATE INDEX idx_events_device_seq ON events(device_id, seq);
+
+CREATE TABLE buckets (                      -- pruned ~6 months
+    device_id   TEXT NOT NULL,
+    bucket_ts   INTEGER NOT NULL,           -- UTC minute boundary (ms)
+    app_key     TEXT NOT NULL,
+    active_ms   INTEGER NOT NULL,
+    PRIMARY KEY (device_id, bucket_ts, app_key)
+);
+
+CREATE TABLE rollups (                      -- kept forever
+    device_id  TEXT NOT NULL,
+    day_utc    TEXT NOT NULL,               -- 'YYYY-MM-DD' UTC day
+    app_key    TEXT NOT NULL,
+    total_ms   INTEGER NOT NULL,
+    category   TEXT,
+    PRIMARY KEY (device_id, day_utc, app_key)
+);
+
+CREATE TABLE settings (                     -- LWW + UTC-day reconciliation
+    key             TEXT PRIMARY KEY,
+    value           BLOB NOT NULL,
+    updated_at_ms   INTEGER NOT NULL,
+    updated_day_utc TEXT NOT NULL,
+    device_id       TEXT NOT NULL           -- last writer
+);
+
+CREATE TABLE category_registry (
+    app_key  TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    source   TEXT NOT NULL                  -- 'registry' | 'manual'
+);
+
+CREATE TABLE manual_overrides (
+    app_key       TEXT PRIMARY KEY,
+    category      TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    sticky        INTEGER NOT NULL DEFAULT 1 -- never auto-reclassified
+);
+
+CREATE TABLE sync_watermark (
+    device_id      TEXT PRIMARY KEY,
+    last_acked_seq INTEGER NOT NULL
+);
+
+-- Queries used by the storage layer (Agent A). Names are contract —
+-- the storage API is part of the frozen surface.
+
+selectAllRollups:
+SELECT * FROM rollups WHERE device_id = ? AND day_utc = ?;
+
+selectBucketsForDay:
+SELECT * FROM buckets WHERE device_id = ? AND bucket_ts >= ? AND bucket_ts < ?;
+
+insertEvent:
+INSERT OR IGNORE INTO events(seq, device_id, app_key, title_hash, started_at_ms, duration_ms, category, sync_state)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+insertBucket:
+INSERT OR REPLACE INTO buckets(device_id, bucket_ts, app_key, active_ms)
+VALUES (?, ?, ?, ?);
+
+upsertRollup:
+INSERT OR REPLACE INTO rollups(device_id, day_utc, app_key, total_ms, category)
+VALUES (?, ?, ?, ?, ?);
+
+upsertSetting:
+INSERT OR REPLACE INTO settings(key, value, updated_at_ms, updated_day_utc, device_id)
+VALUES (?, ?, ?, ?, ?);
+
+insertManualOverride:
+INSERT OR REPLACE INTO manual_overrides(app_key, category, created_at_ms, sticky)
+VALUES (?, ?, ?, 1);
+
+selectAppKeyCategory:
+SELECT category FROM category_registry WHERE app_key = ?;
+
+selectManualOverride:
+SELECT category FROM manual_overrides WHERE app_key = ?;
