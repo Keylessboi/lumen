@@ -1,6 +1,7 @@
 package dev.lumen.macos.store
 
 import dev.lumen.core.clock.LocalDay
+import dev.lumen.macos.collector.MacSystemUi
 import dev.lumen.core.export.ExportPayload
 import dev.lumen.core.model.AppDayRollup
 import dev.lumen.core.model.Setting
@@ -300,6 +301,10 @@ class UsageStore(
 
         val byApp = mutableMapOf<String, Long>()
         for (e in events) {
+            // Also filtered on READ, so history recorded before this existed
+            // is corrected without rewriting or deleting a single event. The
+            // raw record stays intact; only what we count changes.
+            if (MacSystemUi.isSystemUi(e.appKey)) continue
             for (b in RollupEngine.bucket(e)) {
                 if (b.bucketTs < startMs || b.bucketTs >= endMs) continue
                 byApp.merge(b.appKey.value, b.activeMs, Long::plus)
