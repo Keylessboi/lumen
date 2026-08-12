@@ -47,4 +47,38 @@ class ThemeTest {
             .first { it.hashCode() < 0 }
         assertTrue(LumenTheme.colorForKey(negative) in LumenTheme.CategoryPalette)
     }
+
+    // ---- collision handling among visible apps ----
+
+    @Test
+    fun `apps shown together never share a colour, up to the palette size`() {
+        val keys = listOf(
+            "com.apple.Terminal", "dev.lumen.macos", "com.google.Chrome",
+            "com.apple.Safari", "com.spotify.client",
+        )
+        val colors = LumenTheme.colorsFor(keys)
+        assertEquals(keys.size, colors.values.distinct().size)
+    }
+
+    @Test
+    fun `assignment does not change when rows reorder`() {
+        // The actual bug: colour must not follow rank. Reversing the list is
+        // what happens naturally as one app overtakes another during the day.
+        val keys = listOf("a.app", "b.app", "c.app", "d.app")
+        assertEquals(LumenTheme.colorsFor(keys), LumenTheme.colorsFor(keys.reversed()))
+        assertEquals(LumenTheme.colorsFor(keys), LumenTheme.colorsFor(keys.shuffled(kotlin.random.Random(7))))
+    }
+
+    @Test
+    fun `more apps than colours still assigns every one`() {
+        val keys = (1..20).map { "app-$it" }
+        val colors = LumenTheme.colorsFor(keys)
+        assertEquals(20, colors.size)
+        assertTrue(colors.values.all { it in LumenTheme.CategoryPalette })
+    }
+
+    @Test
+    fun `an empty set is empty`() {
+        assertEquals(emptyMap(), LumenTheme.colorsFor(emptyList()))
+    }
 }

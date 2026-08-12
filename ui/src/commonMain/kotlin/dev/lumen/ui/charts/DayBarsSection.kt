@@ -169,6 +169,7 @@ private fun DayDetailPanel(detail: DayDetail, onClose: () -> Unit) {
             )
         } else {
             val max = detail.totals.maxOf { it.totalMs }.coerceAtLeast(1L)
+            val colors = LumenTheme.colorsFor(detail.totals.map { it.appKey.value })
             detail.totals.take(DETAIL_ROWS).forEach { row ->
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -190,7 +191,7 @@ private fun DayDetailPanel(detail: DayDetail, onClose: () -> Unit) {
                                 .clip(RoundedCornerShape(3.dp))
                                 // Same colour the app has in the Today list:
                                 // one app, one colour, everywhere it appears.
-                                .background(LumenTheme.colorForKey(row.appKey.value)),
+                                .background(colors[row.appKey.value] ?: LumenTheme.colorForKey(row.appKey.value)),
                         )
                         Spacer(Modifier.weight((1f - row.totalMs.toFloat() / max).coerceAtLeast(0.0001f)))
                     }
