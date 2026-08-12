@@ -1,70 +1,56 @@
 name: wake-agents
 
-# Fires when a discussion or comment is created/edited.
-# Writes a wake file into .agent-inbox/ so BOTH agents pick up the
-# event on their next poll. This is the cross-agent prompt channel:
-# no webhook receiver needed, no public endpoint, just the repo.
+# Writes wake mailboxes into .agent-inbox/ when a discussion or comment
+# is created. SECURITY RULES (B's findings, accepted):
+#   - Never interpolate ${{ github.event.* }} into shell. Pass via env.
+#   - Wake files carry URL + title ONLY, never the body. A wake file is a
+#     pointer; agents fetch the discussion themselves with normal judgment.
+#   - Push to the agent-inbox branch, never main. Main advances only
+#     through reviewed PRs (docs/plan.md).
+#   - No agent is auto-invoked. The mailbox is read when a human runs an
+#     agent. For urgent items, @-mention the human.
 
 on:
   discussion:
-    types: [created, edited, category_changed]
+    types: [created]
   discussion_comment:
-    types: [created, edited]
+    types: [created]
 
 permissions:
   contents: write
 
 jobs:
-  write-wake-file:
+  write-wake-mailbox:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: agent-inbox
+          fetch-depth: 1
 
-      - name: Compute wake file
-        id: wake
+      - name: Write mailbox (env-passed, pointer-only)
+        env:
+          EVENT_DISC_NUM: ${{ github.event.discussion.number }}
+          EVENT_DISC_TITLE: ${{ github.event.discussion.title }}
+          EVENT_COMMENT_ID: ${{ github.event.comment.id }}
+          EVENT_TYPE: ${{ github.event_name }}
         shell: bash
         run: |
-          TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          KIND="unknown"
-          TITLE=""
-          BODY=""
-          if [ -n "${{ github.event.discussion.number }}" ]; then
-            KIND="discussion"
-            TITLE="${{ github.event.discussion.title }}"
-            BODY="${{ github.event.discussion.body }}"
-            NUM="${{ github.event.discussion.number }}"
-            URL="https://github.com/Keylessboi/lumen/discussions/$NUM"
-          else
-            KIND="comment"
-            DISC="${{ github.event.discussion.number }}"
-            TITLE="comment on discussion #$DISC"
-            BODY="${{ github.event.comment.body }}"
-            URL="https://github.com/Keylessboi/lumen/discussions/$DISC"
-          fi
-          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
-          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Write wake file
-        shell: bash
-        run: |
+          set -euo pipefail
+          F=".agent-inbox/$(printf '%s' "$EVENT_TYPE")-$(printf '%s' "${EVENT_DISC_NUM:-${EVENT_COMMENT_ID:-unknown}}").md"
           mkdir -p .agent-inbox
-          F=".agent-inbox/${{ steps.wake.outputs.kind }}-${{ github.event.discussion.number || github.event.comment.id }}-${{ github.run_id }}.md"
-          cat > "$F" << EOF
-          # Wake: ${{ steps.wake.outputs.title }}
-
-          - **Kind:** ${{ steps.wake.outputs.kind }}
-          - **URL:** ${{ steps.wake.outputs.url }}
-          - **Action:** read the discussion and respond if it addresses your zone.
-
-          ${{ steps.wake.outputs.body }}
-          EOF
+          {
+            printf '# Wake: %s\n\n' "$EVENT_DISC_TITLE"
+            printf -- '- URL: https://github.com/%s/discussions/%s\n\n' "$GITHUB_REPOSITORY" "${EVENT_DISC_NUM:-see comment thread}"
+            printf '%s\n' 'Read the discussion and respond if it addresses your zone.'
+          } > "$F"
           echo "wrote $F"
 
-      - name: Commit and push wake file
+      - name: Commit and push to agent-inbox branch
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name "lumen-bot"
           git config user.email "lumen-bot@users.noreply.github.com"
           git add .agent-inbox/
@@ -73,4 +59,4 @@ jobs:
             exit 0
           fi
           git commit -m "agent-wake: discussion activity [skip ci]"
-          git push
+          git push origin HEAD:agent-inbox
