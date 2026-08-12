@@ -147,8 +147,7 @@ fun TodayScreen(
             SectionLabel("APPS")
             Spacer(Modifier.height(10.dp))
 
-            val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
-            // Colour comes from the CATEGORY, not from the app key. That is
+            val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)            // Colour comes from the CATEGORY, not from the app key. That is
             // what ties each row to the strip above it: the strip is these
             // same numbers one level up, so a user can see at a glance which
             // apps make up the green. Falling back to a per-app hue keeps
@@ -271,6 +270,11 @@ private fun AppRow(
         animationSpec = tween(durationMillis = if (reducedMotion) 0 else 200),
         label = "bar",
     )
+    // A 2-second app next to a 15-hour one is 0.004% of the bar — invisible,
+    // which reads as "not tracked" while the number beside it says 2s. Floor
+    // the fill at a visible sliver so every app row shows a bar; the number
+    // stays exact, so proportion is still honest above the floor.
+    val visible = animated.coerceAtLeast(MIN_BAR_FRACTION)
 
     Row(
         Modifier.fillMaxWidth().height(ROW_HEIGHT),
@@ -294,7 +298,7 @@ private fun AppRow(
             Box(
                 Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(animated)
+                    .fillMaxWidth(visible)
                     .clip(RoundedCornerShape(4.dp))
                     .background(color)
             )
@@ -316,3 +320,6 @@ private fun AppRow(
         )
     }
 }
+
+/** Smallest visible bar fill (3%), so a tiny app is still seen as tracked. */
+private const val MIN_BAR_FRACTION = 0.03f
