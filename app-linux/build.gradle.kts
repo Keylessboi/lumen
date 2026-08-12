@@ -18,6 +18,7 @@ kotlin {
             dependencies {
                 implementation(project(":core"))
                 implementation(project(":ui"))
+                implementation(project(":transport-xmpp"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
                 implementation(compose.runtime)
