@@ -57,8 +57,43 @@ object LumenTheme {
      * is a specified algorithm, so this is stable across runs and platforms
      * rather than merely stable within one process.
      */
-    fun colorForKey(key: String): Color =
-        CategoryPalette[((key.hashCode().toLong() and 0x7fffffffL) % CategoryPalette.size).toInt()]
+    fun colorForKey(key: String): Color = CategoryPalette[paletteIndex(key)]
+
+    private fun paletteIndex(key: String): Int =
+        ((key.hashCode().toLong() and 0x7fffffffL) % CategoryPalette.size).toInt()
+
+    /**
+     * Colours for a set of apps shown together, avoiding adjacent duplicates.
+     *
+     * [colorForKey] alone is stable but collides: eight hues cannot separate
+     * more than eight apps, and two rows next to each other in the same
+     * colour reads as a rendering fault rather than as a coincidence.
+     *
+     * So each key takes its preferred colour, and a key whose colour is
+     * already taken probes forward for a free one. The probe order is by KEY,
+     * not by position in the list — so a set of apps always resolves the same
+     * way regardless of which is currently on top, which is the property that
+     * mattered in the first place. Colours only shift when the SET changes,
+     * not when the ranking does.
+     *
+     * Beyond eight apps duplicates are unavoidable and reappear, in a stable
+     * order.
+     */
+    fun colorsFor(keys: List<String>): Map<String, Color> {
+        val taken = mutableSetOf<Int>()
+        val assigned = mutableMapOf<String, Int>()
+        for (key in keys.sorted()) {
+            var idx = paletteIndex(key)
+            var probes = 0
+            while (idx in taken && probes < CategoryPalette.size) {
+                idx = (idx + 1) % CategoryPalette.size
+                probes++
+            }
+            taken += idx
+            assigned[key] = idx
+        }
+        return assigned.mapValues { (_, idx) -> CategoryPalette[idx] }
+    }
 
     /**
      * Tabular figures — non-negotiable per the spec. Proportional numerals

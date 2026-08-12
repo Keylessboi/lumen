@@ -123,6 +123,10 @@ fun TodayScreen(
             Spacer(Modifier.weight(1f))
         } else {
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
+            // Resolved for the whole visible set so two rows are not the same
+            // colour, and resolved by key so the assignment does not change
+            // when rows reorder during the day.
+            val colors = LumenTheme.colorsFor(totals.map { it.appKey.value })
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 // fill = true so the list takes the leftover height and the
@@ -137,7 +141,7 @@ fun TodayScreen(
                     AppRow(
                         row = row,
                         fraction = row.totalMs.toFloat() / max.toFloat(),
-                        color = LumenTheme.colorForKey(row.appKey.value),
+                        color = colors[row.appKey.value] ?: LumenTheme.colorForKey(row.appKey.value),
                         reducedMotion = reducedMotion,
                     )
                 }
