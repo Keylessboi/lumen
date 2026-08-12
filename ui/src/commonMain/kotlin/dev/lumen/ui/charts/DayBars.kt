@@ -125,6 +125,19 @@ fun DayBars(
     selectedDay: String? = null,
     onSelectDay: (String) -> Unit = {},
     barHeight: androidx.compose.ui.unit.Dp = 168.dp,
+    /**
+     * Take the height the caller allots instead of the fixed [barHeight].
+     *
+     * A fixed plot height is right when the chart is the only thing competing
+     * for the space and wrong when it is not: at the default window size, with
+     * the history banner showing, 168.dp of bars plus a banner adds up to more
+     * than the window, and a Column does not shrink its children to fit — it
+     * hands the leftover to whoever asked for it and lets the rest hang off the
+     * bottom edge. The app list above went to zero height and the axis labels
+     * below went off-screen. When the caller can measure the space, it should
+     * be the one deciding.
+     */
+    fillHeight: Boolean = false,
 ) {
     if (days.isEmpty()) return
 
@@ -133,7 +146,7 @@ fun DayBars(
     val peak = maxOf(days.maxOf { it.totalMs }, averageMs ?: 0L).coerceAtLeast(1L)
 
     Column(modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(barHeight)) {
+        Box(if (fillHeight) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().height(barHeight)) {
             Row(
                 Modifier.fillMaxWidth().fillMaxHeight(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
