@@ -1,40 +1,41 @@
 # Lumen Data Model (FROZEN at M1)
 
-Owner: Agent A. Normative for both agents. Changes require a tag-bump PR
-reviewed by both agents. Schema migrations are additive-only.
+Owner: Agent A. Binding for both agents. Changes require a tag-bump PR
+reviewed by both agents. Schema migrations only add.
 
-## Canonical unit & layering
+## Standard unit & layering
 
 ```
 raw events (local, ~30d)  ->  1-min buckets (local, ~6mo)  ->  app-day rollups (forever)
 ```
 
-- **Raw events** are the source of truth ON DEVICE. Pruned after ~30 days.
-- **1-min buckets** are the canonical stored granularity (Android's
-  UsageStats only keeps event detail for days, aggregates long-term —
-  this model is what the platform forces, not a compromise).
+- **Raw events** are the real record on the device. Pruned after ~30
+  days.
+- **1-min buckets** are the standard level of stored detail. Android's
+  UsageStats keeps event detail for days only, then aggregates. The
+  platform forces this model; it is not a compromise.
 - **App-day rollups** are the sync/API unit. Kept forever. Tiny.
 
 ## Reconciliation (TWO strategies — never one)
 
 | Data | Strategy | Rule |
 |---|---|---|
-| events / buckets / rollups | **append-merge** | dedupe by (device_id, monotonic seq); immutable; sum across devices |
+| events / buckets / rollups | **append-merge** | remove duplicates by (device_id, monotonic seq); immutable; sum across devices |
 | settings / limits / overrides | **LWW + UTC-day** | last write wins per field, tiebreak (device_id, seq); UTC day boundary |
 
-**NO CRDT. NO wall-clock LWW for events.** A clock-skewed device must
-never silently clobber data. Server order (pubsub item ID / MAM archive
-ID) is the ordering authority; gaps/jumps surface a sync-integrity
-warning instead of silent convergence.
+**NO CRDT. NO last-write-wins by clock time for events.** A device with
+a wrong clock must never silently overwrite data. Server order (pubsub
+item ID / MAM archive ID) is the ordering authority; gaps and jumps
+show a sync-integrity warning instead of silent convergence.
 
 ## IDs
 
-- **DeviceId**: UUID v4, generated per install. Device provenance on
-  every record.
-- **AppKey**: canonical app identity — Linux: desktop-file id /
-  WM_CLASS / exec name. Android: package name. Joins everything.
+- **DeviceId**: UUID v4, generated per install. Device origin on every
+  record.
+- **AppKey**: the standard app identity — Linux: desktop-file id /
+  WM_CLASS / exec name. Android: package name. It links everything.
 
-## SQLite schema (normative)
+## SQLite schema (binding)
 
 ```sql
 CREATE TABLE devices (
@@ -102,7 +103,7 @@ CREATE TABLE sync_watermark (
 );
 ```
 
-## Sync record envelope (travels the wire, E2EE-encrypted payload)
+## Sync record envelope (sent over the network, E2EE-encrypted payload)
 
 ```kotlin
 data class SyncRecord(
@@ -113,14 +114,15 @@ data class SyncRecord(
 )
 ```
 
-Dedupe on receipt by (deviceId, seq). Rollback detection via optional
-hash chain (SyncIntegrity interface, core/sync/SyncTransport.kt).
+Remove duplicates on receipt by (deviceId, seq). Rollback detection
+with an optional hash chain (SyncIntegrity interface,
+core/sync/SyncTransport.kt).
 
 ## Day boundary
 
 UTC only. `UtcDay.dayOf(epochMs)` returns `YYYY-MM-DD`. Two devices in
-different timezones must agree on what day a rollup belongs to. Device-
-local midnight is a bug.
+different time zones must agree on what day a rollup belongs to.
+Device-local midnight is a bug.
 
 ## Retention summary
 
@@ -134,4 +136,4 @@ local midnight is a bug.
 
 Home screen sums rollups across devices. Per-device minutes are
 independent (phone time + desktop time = day total). Overlapping
-sessions are fine — they're per-device by construction.
+sessions are fine — they are per-device by design.

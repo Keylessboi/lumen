@@ -1,0 +1,41 @@
+name: ownership
+
+# Enforces the Two-Agent Execution Contract (docs/plan.md).
+# Derives the agent from the branch prefix and fails closed on
+# unprefixed branches. Rejects PRs that touch files outside the
+# owning agent's zone.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  ownership-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive agent from branch prefix (fail closed)
+        id: agent
+        shell: bash
+        run: |
+          BRANCH="${GITHUB_HEAD_REF}"
+          case "$BRANCH" in
+            a/*) echo "agent=A" >> "$GITHUB_OUTPUT" ;;
+            b/*) echo "agent=B" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "Unprefixed branch '$BRANCH' — use a/<milestone>/<slug> or b/<milestone>/<slug> per docs/plan.md." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Run ownership check
+        shell: bash
+        run: |
+          ./tools/ownership-check.sh "${{ steps.agent.outputs.agent }}" origin/main "${{ github.event.pull_request.head.sha }}"

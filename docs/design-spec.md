@@ -1,46 +1,46 @@
 # Lumen Design Spec (Week-1, FROZEN at M0)
 
 Owner: Agent A. Agent B may read and file issues, never edit.
-This spec is normative — "beautiful" is defined here, before code.
+This spec is binding — "beautiful" is defined here, before code.
 
 ## Design language
 
 Lumen is a **mirror, not a judge**. The app tells the user where their
-attention went without shame energy. If the overview screen glows red
-and says "you're failing", users get learned helplessness and uninstall.
+attention went without shaming them. If the overview screen glows red
+and says "you're failing", users feel helpless and uninstall.
 
-- **Tone**: calm, restrained, honest. Zero guilt-bombing. No streaks,
-  no badges, no gamification. Streaks in a screen-time app are a shame
-  engine; loss-aversion drives abandonment, not retention.
+- **Tone**: calm, restrained, honest. No shaming. No streaks,
+  no badges, no gamification. Streaks shame the user. They make users
+  quit, not stay.
 - **Copy**: plain declarative sentences. "4h 20m Communication" — not
   "You spent way too long on social media". Never "smart", never "AI".
-- **Privacy posture**: local-first. Sync is opt-in ("back up / sync
-  devices"), never a first-run blocker. First run completes under 60
-  seconds with no account.
+- **Privacy**: data stays on the device. Sync is opt-in ("back up /
+  sync devices") and never blocks first run. First run completes under
+  60 seconds with no account.
 
 ## Color
 
 - **Background**: ink-near-black `#0E1116` — NOT pure `#000` (OLED
-  smearing on Android). Dark mode is the default and primary.
+  smearing on Android). Dark mode is the default.
 - **Accent**: calm indigo `#7C9CF5` (or teal `#6BBFA8` — pick ONE and
-  hold it; the accent is the only saturated color in the app).
+  keep it; the accent is the only saturated color in the app).
 - **Category palette**: Okabe-Ito colorblind-safe categorical palette
   (8 hues). Categories never use red as a "bad" state — red only for
   destructive actions (delete, revoke device).
-- **Semantic states**: success/limit-hit are expressed with text and
-  icon, never color alone (accessibility).
+- **State colors**: success and limit-hit always use text and icon,
+  never color alone (accessibility).
 
 ## Theme behavior
 
-- Respect `prefers-color-scheme` / `prefer-dark` on Linux (Hyprland
+- Respect `prefers-color-scheme` / `prefer-dark` on Linux. Hyprland
   users run Catppuccin/Gruvbox/Nord — the app follows the system
-  scheme; identity comes from typography and motion, not palette).
+  scheme. Identity comes from typography and motion, not palette.
 - On Android: follow system dark/light toggle. No separate in-app theme
   switcher in v1.
 
 ## Typography
 
-- A grotesque sans with **tabular figures** — non-negotiable for time
+- A sans-serif with **tabular figures** — non-negotiable for time
   data. Numbers that shift width during animation look broken.
 - Numerals: tabular (fixed-width) in every time readout: `4h 20m`,
   rollup totals, chart axis labels.
@@ -53,7 +53,7 @@ and says "you're failing", users get learned helplessness and uninstall.
 - Generous spacing; data-dense but not cluttered.
 - On Hyprland: **opaque window, let the compositor round the corners.**
   Never double-round (app-drawn rounded corners + compositor rounding
-  = garbage). No client-side blur — the compositor owns blur.
+  = garbage). No client-side blur — the compositor handles blur.
 
 ## Motion
 
@@ -72,30 +72,30 @@ Exactly three chart types in v1 (no more):
 - No confusing axes; no hidden aggregations. What the chart shows must
   match the numbers beside it.
 
-## Screens (information hierarchy)
+## Screens (by priority)
 
-1. **Today** (the only screen that matters for retention): intent line
-   ("Focus: 3h design work" — stated goal, not judgment), the big
+1. **Today** (the only screen that decides whether users stay): the
+   user's goal ("Focus: 3h design work" — stated, not judged), the big
    number, one donut/bars per category, and a **single one-tap "take a
    break" action** (Android: open home; Linux: close focused window).
-2. **Categories**: every category gets a "why is this here" affordance
-   behind long-press, plus manual re-tag. Unknown apps land in a neutral
+2. **Categories**: every category has a "why is this here" option on
+   long-press, plus manual re-tag. Unknown apps land in a neutral
    "Uncategorized" bucket — never a confident wrong guess.
 3. **App detail**: day curve, totals, 7/30-day history.
 4. **Suggestions**: exactly one nudge in v1 — break reminder. Gentle,
-   one-tap, never shaming, rate-limited.
-5. **Settings / account**: the E2EE onboarding must be a ~60-second
-   flow. Account creation = "Where should your data live?" — friendly
-   server list, NEVER the words XMPP/JID/server-address. "Advanced: use
-   my own server" behind disclosure.
+   one-tap, never shaming, not too often.
+5. **Settings / account**: the E2EE setup must take about 60 seconds.
+   Account creation = "Where should your data live?" — friendly server
+   list, NEVER the words XMPP/JID/server-address. "Advanced: use my own
+   server" stays hidden until the user expands it.
 
-## Abandonment guardrails (design requirements)
+## Safeguards against abandonment (design requirements)
 
-- The setup gauntlet kills apps: Android = Usage Access + battery
+- The setup process makes users quit: Android = Usage Access + battery
   optimization exemption (2 hoops — we do NOT use accessibility
-  service). Linux = install + autostart. If v1 couples that with
-  account creation, we lose 80% of users in 90 seconds — so first-run
-  stays local and account is opt-in.
+  service). Linux = install + autostart. If v1 ties that to account
+  creation, we lose 80% of users in 90 seconds — so first run stays
+  local and account is opt-in.
 - The app must exclude ITSELF from its own numbers correctly from day
-  one, or every number is suspect.
+  one, or no number can be trusted.
 - Charts that lie = uninstall. Numbers and charts must agree.

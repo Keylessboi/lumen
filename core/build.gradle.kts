@@ -14,6 +14,10 @@ kotlin {
         }
     }
 
+    // Single desktop JVM target. KMP forbids two jvm() targets in one module.
+    // Platform keychains live in the app modules (LinuxKeychain in app-linux,
+    // MacosKeychain in app-macos) as classes implementing core's Keychain
+    // interface — expect/actual does not survive two JVM targets.
     jvm("desktop") {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
@@ -59,7 +63,7 @@ sqldelight {
 
 android {
     namespace = "dev.lumen.core"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 26
     }

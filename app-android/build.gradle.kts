@@ -38,7 +38,7 @@ kotlin {
 
 android {
     namespace = "dev.lumen.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.lumen.app"

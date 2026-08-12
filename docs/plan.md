@@ -1,56 +1,59 @@
 # Lumen v1 — Build Plan
 
-**Provenance:** Produced by the plan agent from the distilled adversarial bundle (5 hostile lanes × 3 rounds + 5 addenda: platform feasibility, security/systems, product/data, design/UX, scope/execution). Decision-complete; a builder can execute without further interviews.
+**Provenance:** The plan agent produced this plan from the adversarial bundle (5 hostile lanes × 3 rounds + 5 addenda: platform feasibility, security/systems, product/data, design/UX, scope/execution). It is decision-complete. A builder can execute it without further interviews.
 
 ---
 
 ## Two-Agent Execution Contract
 
-Lumen is built by **two agents in parallel**. This contract prevents interference: every file has exactly one owner, every cross-agent dependency flows through a frozen interface, and every milestone is a git-tagged, independently verifiable unit.
+Two agents build Lumen in parallel. This contract stops interference: every file has exactly one owner, every cross-agent dependency flows through a frozen interface, and every milestone is a git-tagged, independently verifiable unit.
 
 ### Ownership zones (one owner per path, no exceptions)
+
+**Machine split (as of M0):** Agent A runs **Arch Linux + Android testing**. Agent B runs **macOS + iOS**. Zones follow the machines.
 
 | Path | Owner | Notes |
 |---|---|---|
 | `core/src/commonMain/**` | **Agent A** | Data model, rollup, clock, category, sync, crypto. **FROZEN at M1 — after the freeze, Agent B codes against it without editing it.** |
 | `core/src/commonTest/**` | **Agent A** | Shared contract tests. |
-| `core/src/desktopMain/**` | **Agent A** | libsecret/OS keyring impl. |
-| `core/src/androidMain/**` | **Agent B** | Android Keystore impl ONLY. Smallest possible surface. |
+| `core/src/desktopMain/**` | **Agent A** | Single JVM desktop target (KMP forbids two jvm() targets per module). Keychain lives in app modules, not here. |
+| `core/src/androidMain/**` | **Agent A** | Android Keystore impl. Smallest possible surface. |
 | `transport-xmpp/**` | **Agent A** | XMPP client, IBR, MAM, embedded provider list. |
-| `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts. |
-| `app-android/**` | **Agent B** | CMP Android app, UsageStats collector, hardening. |
+| `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
+| `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
+| `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). NSWorkspace frontmost-app collector + MacosKeychain. Seam designed at M0. |
 | `tools/registry-builder/**` | **Agent A** | Category registry dataset tooling. |
-| `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier. |
+| `tools/sync-test-server/**` | **Agent A** | Test XMPP server + ciphertext verifier. |
 | `docs/design-spec.md` | **Agent A** | Week-1 design spec owner. Agent B may *read* and file issues, never edit. |
 | `docs/data-model.md` | **Agent A** | Frozen data model doc. |
-| `docs/e2ee.md` | **Agent B** | E2EE design + threat model doc. |
-| `docs/providers.md` | **Agent B** | Provider vetting policy + list. |
+| `docs/e2ee.md` | **Agent A** | E2EE design + threat model doc. |
+| `docs/providers.md` | **Agent A** | Provider vetting policy + list. |
 | `docs/non-goals.md` | shared | Both may append, never delete. |
 
 ### Interface freeze points (the only things that cross zones)
 
 These are the *only* files Agent B consumes from Agent A (and vice-versa). They freeze at specific gates and never change without a milestone review:
 
-1. **`core/src/commonMain` public API** — `SyncTransport`, `E2EE` seam, data model types, `rollup` engine signature. **Frozen at M1.** Agent B writes androidMain against this API. Changes after freeze require a tag-bump PR reviewed by both agents.
+1. **`core/src/commonMain` public API** — `SyncTransport`, `E2EE` seam, data model types, `rollup` engine signature. **Frozen at M1.** Agent B writes androidMain against this API. Changes after freeze require a tag-bump PR; both agents review it.
 2. **`E2EE.kt` envelope format** — frozen at M4 (G3). The ciphertext envelope is a wire contract; `docs/e2ee.md` is its normative spec.
 3. **SQLite schema** — frozen at M1. Both agents' UI reads it; schema migrations are additive-only and owned by Agent A.
 
 ### Git protocol (how they share one repo)
 
 - `main` branch is **always green** — both agents merge only via passing PRs.
-- **Agent A works in `feat/core-linux` branches; Agent B in `feat/android` branches.** Branches are per-milestone, named `feat/<milestone>/<slug>` (e.g., `feat/m2/linux-collector`).
+- **Branch prefixes are the agent identifier.** Agent A branches: `a/<milestone>/<slug>` (e.g. `a/m2/linux-collector`). Agent B branches: `b/<milestone>/<slug>` (e.g. `b/m3/usagestats-collector`). Unprefixed branches **fail closed** in CI — the workflow derives the agent from the prefix and refuses to run without one.
 - **Merge windows:** Agent A merges to main at M1, M2, M4, M6, M7. Agent B merges at M1, M3, M5, M6, M7. Both branches exist simultaneously; they only touch their own zones, so no merge conflicts are possible *unless a freeze point was violated* — which the CI contract test catches.
-- **CI gate (non-negotiable):** every PR must pass `./gradlew :core:test :transport-xmpp:test` plus its own module's build. A PR that touches a file outside its owner's zone **fails CI by convention** (enforced by a `tools/ownership-check.sh` script wired into CI).
+- **CI gate (non-negotiable):** every PR must pass `./gradlew :core:test :transport-xmpp:test` plus its own module's build. A PR that touches a file outside its owner's zone **fails CI by convention** (enforced by `tools/ownership-check.sh` wired into `.github/workflows/ownership.yml`). Module-level `build.gradle.kts` files are shared infra: either agent may edit them, the other agent reviews in the PR body.
 
 ### Async coordination via GitHub Discussions
 
-The two agents are separate processes and never share a terminal. All async coordination happens through **GitHub Discussions** on this repo (`https://github.com/Keylessboi/lumen/discussions`). Treat Discussions as the shared bulletin board; the issue tracker is for code defects only.
+The two agents are separate processes and never share a terminal. They coordinate through **GitHub Discussions** on this repo (`https://github.com/Keylessboi/lumen/discussions`). Treat Discussions as the shared bulletin board; the issue tracker is for code defects only.
 
 - **Cross-agent questions** (contract ambiguity, interface drift, dependency ordering) go to a Discussion, tagged `agent-a` or `agent-b`, NOT a DM the other agent will never see. Use the pinned thread `agent-coordination` for anything time-sensitive.
 - **Freeze-point changes** (anything touching `core/src/commonMain`, the SQLite schema, or the E2EE envelope) require a Discussion announcing the change + a 24h review window before the tag-bump PR. Both agents watch the `freeze-review` label.
 - **Milestone handoffs:** the agent exiting a milestone opens a Discussion titled `handoff: M<N> -> M<N+1>` with the tag hash, what was verified, and what the other agent must confirm before starting. The receiving agent replies with their go/no-go.
 - **Naming convention:** `[A]` / `[B]` prefix on the subject line so the other agent can filter. One topic per thread. Close threads when resolved.
-- **GitHub issue tracker** is reserved for: build failures, CI breaks, security findings, and acceptance-criteria failures. Open an issue with the milestone tag and gate ID (e.g., `M4 / G3`).
+- **GitHub issue tracker:** use it only for build failures, CI breaks, security findings, and acceptance-criteria failures. Open an issue with the milestone tag and gate ID (e.g., `M4 / G3`).
 
 ### Addressable milestones
 
@@ -61,12 +64,14 @@ Every milestone is a **git tag** (`M0`..`M8`) on main, with a one-commit-audit t
 | `M0` | Phase 0 exit | `docs/design-spec.md`, `docs/data-model.md`, green `:core:build` | A |
 | `M1` | Contract freeze | frozen `core` public API + schema; `ownership-check.sh` green | A (+B review) |
 | `M2` | G1 (Linux slice) | `app-linux` collector + UI on real Hyprland | A |
-| `M3` | G2 (Android slice) | `app-android` UsageStats + UI on device | B |
-| `M4` | G3 (sync+E2EE) | `transport-xmpp` + `core` sync, ciphertext-only verified | A (sync) + B (test server) |
-| `M5` | G4 (export/migrate) | Argon2id export/import round-trip | B |
+| `M3` | G2 (Android slice) | `app-android` UsageStats + UI on device | A |
+| `M4` | G3 (sync+E2EE) | `transport-xmpp` + `core` sync, ciphertext-only verified | A |
+| `M5` | G4 (export/migrate) | Argon2id export/import round-trip | A |
 | `M6` | G5 (categories) | registry + override behavior | A |
 | `M7` | G6 (nudge+polish) | break reminder, design pass, RC | shared |
 | `M8` | v1.0 release | full acceptance checklist | shared |
+
+**macOS/iOS (Agent B):** post-MVP #2 (macOS) and #3 (iOS) — no v1 gate. The `desktopMacosMain` source set and `app-macos` module exist as seams from M0 but carry no v1 acceptance criteria. B merges to main only for seam/maintenance work until post-MVP milestones are scheduled.
 
 **Interference rule:** an agent may not start a milestone whose *entry* gate is the other agent's exit gate without confirming that tag exists on main. Work only ever forks from a tagged main.
 
@@ -111,8 +116,9 @@ Every milestone is a **git tag** (`M0`..`M8`) on main, with a one-commit-audit t
 
 ## Parallelization
 
-Parallel: Spike 1 ∥ Spike 2; registry dataset (wk2+) ∥ core; provider vetting (wk1, human) ∥ everything; categories module ∥ sync; Sway ∥ X11 after Hyprland proven; docs ∥ final phases.
-Sequential: spikes → collectors; schema freeze → slices; transport → engine → E2EE; G3 → export/migrate; G1→G6.
+Run these in parallel: Spike 1 ∥ Spike 2; registry dataset (wk2+) ∥ core; provider vetting (wk1, human) ∥ everything; categories module ∥ sync; Sway ∥ X11 after Hyprland proven; docs ∥ final phases.
+
+Run these in sequence: spikes → collectors; schema freeze → slices; transport → engine → E2EE; G3 → export/migrate; G1→G6.
 
 ## Repo Layout
 

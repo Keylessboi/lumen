@@ -17,23 +17,26 @@ BASE="${2:?usage: ownership-check.sh <A|B> <base> <head>}"
 HEAD="${3:?usage: ownership-check.sh <A|B> <base> <head>}"
 
 # Ownership zones (paths are prefix-matched)
+# Machine split (M0): Agent A = Arch Linux + Android testing.
+# Agent B = macOS + iOS.
 ZONE_A=(
   "core/src/commonMain"
   "core/src/commonTest"
   "core/src/desktopMain"
+  "core/src/androidMain"
   "transport-xmpp"
   "app-linux"
+  "app-android"
   "tools/registry-builder"
+  "tools/sync-test-server"
   "docs/design-spec.md"
   "docs/data-model.md"
+  "docs/e2ee.md"
+  "docs/providers.md"
   "docs/non-goals.md"
 )
 ZONE_B=(
-  "core/src/androidMain"
-  "app-android"
-  "tools/sync-test-server"
-  "docs/e2ee.md"
-  "docs/providers.md"
+  "app-macos"
   "docs/non-goals.md"
 )
 
@@ -49,7 +52,20 @@ SHARED=(
   "README.md"
   "LICENSE"
   ".gitignore"
+  "docs"
 )
+
+# Module-level build files are shared infra too (they configure targets for
+# both agents — e.g. core/build.gradle.kts configures androidMain, which is
+# Agent B's zone, and desktopMain, which is Agent A's). Either agent may edit
+# them; the other agent reviews the change in the PR body.
+is_module_build_file() {
+  case "$1" in
+    */build.gradle.kts) return 0 ;;
+    */build.gradle)     return 0 ;;
+    *)                  return 1 ;;
+  esac
+}
 
 in_zone() {
   local file="$1"; shift
@@ -66,7 +82,7 @@ violations=()
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
-  if in_zone "$file" "${SHARED[@]}"; then
+  if in_zone "$file" "${SHARED[@]}" || is_module_build_file "$file"; then
     continue
   fi
   if [ "$AGENT" = "A" ]; then

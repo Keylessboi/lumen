@@ -5,7 +5,7 @@
 // One implementation, three configurations:
 //   (a) public provider via in-app IBR
 //   (b) self-hosted server (advanced, manual credentials)
-//   (c) local-only (transport unconfigured — sync never runs)
+//   (c) local-only (transport not configured, sync never runs)
 //
-// See docs/plan.md Two-Agent Execution Contract before touching this
-// directory if you are Agent B.
+// Read the Two-Agent Execution Contract in docs/plan.md before touching
+// this directory. Agent B: do not modify files here.

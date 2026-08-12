@@ -3,5 +3,5 @@
 // UI: today / categories / app detail / settings / account.
 // Charts: Skia canvas (shared with Android).
 //
-// See docs/plan.md Two-Agent Execution Contract before touching this
-// directory if you are Agent B.
+// Read the Two-Agent Execution Contract in docs/plan.md before touching
+// this directory. Agent B: do not modify files here.
