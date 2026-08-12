@@ -40,7 +40,18 @@ import java.io.File
  * derives durations; [RollupEngine] buckets and rolls them up; the store
  * survives restarts.
  */
-fun main() = application {
+fun main(args: Array<String>) {
+    // `lumen --headless` runs the tracking pipeline with no window — the
+    // systemd service mode. The window app shares the same store, so both
+    // can run at once and agree on the day.
+    if (args.contains("--headless")) {
+        mainHeadless()
+        return
+    }
+    runApp()
+}
+
+private fun runApp() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Lumen",
