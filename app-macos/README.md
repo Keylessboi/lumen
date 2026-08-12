@@ -7,7 +7,7 @@
 ./gradlew :app-macos:run
 ```
 
-No account, no sync, no network, no permission prompts. `docs/plan.md` locks local-only as the default posture — *"sync additive, never a dependency"*, *"unconfigured transport valid"* — so a local-only build is a complete slice rather than a stub, and it satisfies the v1 criterion *"Local-first: sync never blocks"* on its own.
+No account, no sync, no network. No permission prompts either, unless you opt into the history import below. `docs/plan.md` locks local-only as the default posture — *"sync additive, never a dependency"*, *"unconfigured transport valid"* — so a local-only build is a complete slice rather than a stub, and it satisfies the v1 criterion *"Local-first: sync never blocks"* on its own.
 
 **Note on the dev-mode self-reading.** Launched via `./gradlew :app-macos:run` the app sees itself as `net.java.openjdk.java` / "MainKt", because a bare JVM process has no bundle identity. Packaged (`./gradlew :app-macos:packageDmg`) it appears correctly as `dev.lumen.macos` / "Lumen". Lumen deliberately does **not** filter itself out of its own totals — time spent reading your screen-time app is still screen time, and hiding it would be exactly the kind of flattering lie the design spec rules out.
 
@@ -49,11 +49,22 @@ It has two real costs, both recorded in `CollectorCapabilities` rather than hidd
 
 ## The seam
 
-`AppUsageCollector.kt` in this module is a **proposal for `core/src/commonMain`**, which is Agent A's zone and freezes at M1. It lives here so the proposal ships with a working implementation instead of a sketch. Delete it and import from core once Agent A lands it.
+`AppUsageCollector` now lives in `core/src/commonMain` (Agent A landed it in `740b4af`); this module implements it. The local copy that shipped with the proposal has been deleted.
 
-Design note, since it is the load-bearing decision: collectors report **transitions** (`FocusChange`), never durations. The three platforms disagree about what they can observe — Hyprland pushes a compositor event, Android hands back a batch of historical foreground/background records, macOS posts an NSWorkspace notification — but all three can produce a transition, while only some can produce a trustworthy duration. Duration arithmetic across sleep/wake, timezone changes and clock steps is subtle and already locked centrally in `docs/data-model.md`; doing it once in the rollup engine beats doing it three times in three collectors, wrong in three different ways.
+Design note, since it is the load-bearing decision: collectors report **transitions** (`FocusChange`), never durations. The three platforms disagree about what they can observe — Hyprland pushes a compositor event, Android hands back batched historical records, macOS posts an NSWorkspace notification — but all three can produce a transition, while only some can produce a trustworthy duration. Duration arithmetic across sleep/wake, timezone changes and clock steps is subtle and already locked centrally in `docs/data-model.md`; doing it once in the rollup engine beats doing it three times in three collectors, wrong in three different ways.
 
-`backfill()` exists for Android specifically. `UsageStatsManager` is authoritative and retains events for days, so an app that was killed can recover what it missed. macOS and the Linux compositors cannot, so they declare `canBackfill = false` — which lets the engine distinguish a *permanent* gap from a *pending* one. That is the same distinction `docs/providers.md` §5 draws for MAM gaps the archive can no longer fill, and it matters for the same reason: a gap that will never fill must surface, not silently resolve.
+### Known seam gap: `backfill()` cannot express historical intervals
+
+`LsAppInfoCollector` declares `canBackfill = false` and the history import is deliberately **not** wired through `AppUsageCollector.backfill()`, because the seam's return type cannot carry the data faithfully.
+
+`backfill(sinceMs): List<FocusChange>` returns transitions. But every platform that can actually backfill returns **intervals**: `knowledgeC` gives an explicit start and end per focus period, and Android's `UsageStatsManager` gives paired `MOVE_TO_FOREGROUND`/`MOVE_TO_BACKGROUND` events. Flattening an interval list into transitions loses two things:
+
+- the **end** of the final interval, so the last session has no duration; and
+- the distinction between "switched straight to app B" and "stopped using the Mac, then later opened B" — the gap between intervals is idle time, and a transition list cannot say so.
+
+For a screen-time tracker that second one is not cosmetic: it is the difference between an accurate day and one that credits hours of sleep to whatever was frontmost.
+
+Raised for Agent A before the M1 freeze. Until it is resolved the import writes `FocusEvent`s to the store directly, which is lossless.
 
 ---
 
@@ -61,7 +72,7 @@ Design note, since it is the load-bearing decision: collectors report **transiti
 
 Live tracking starts blank: it only knows what happened after Lumen launched. macOS itself keeps a record of app focus going back weeks, in `~/Library/Application Support/Knowledge/knowledgeC.db` — the system store behind Screen Time. Lumen can import it once to fill in the past.
 
-This is the macOS counterpart to Android's `UsageStatsManager`, and it is what makes `AppUsageCollector.canBackfill` true here.
+This is the macOS counterpart to Android's `UsageStatsManager`. It is *not* exposed through `AppUsageCollector.backfill()` — see the seam gap above for why that return type cannot carry it losslessly.
 
 **It costs Full Disk Access, and that is a genuinely large ask.** An app holding FDA can read Mail, Messages, Safari history and every other user file. Lumen reads only rows whose `ZSTREAMNAME` is `/app/inFocus` and ignores everything else in the store — but the *grant* is not that narrow, and the UI says so rather than glossing it. Hence: opt-in, off by default, dismissable, and tracking works completely without it.
 
