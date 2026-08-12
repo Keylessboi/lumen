@@ -1,0 +1,76 @@
+name: wake-agents
+
+# Fires when a discussion or comment is created/edited.
+# Writes a wake file into .agent-inbox/ so BOTH agents pick up the
+# event on their next poll. This is the cross-agent prompt channel:
+# no webhook receiver needed, no public endpoint, just the repo.
+
+on:
+  discussion:
+    types: [created, edited, category_changed]
+  discussion_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+
+jobs:
+  write-wake-file:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute wake file
+        id: wake
+        shell: bash
+        run: |
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          KIND="unknown"
+          TITLE=""
+          BODY=""
+          if [ -n "${{ github.event.discussion.number }}" ]; then
+            KIND="discussion"
+            TITLE="${{ github.event.discussion.title }}"
+            BODY="${{ github.event.discussion.body }}"
+            NUM="${{ github.event.discussion.number }}"
+            URL="https://github.com/Keylessboi/lumen/discussions/$NUM"
+          else
+            KIND="comment"
+            DISC="${{ github.event.discussion.number }}"
+            TITLE="comment on discussion #$DISC"
+            BODY="${{ github.event.comment.body }}"
+            URL="https://github.com/Keylessboi/lumen/discussions/$DISC"
+          fi
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Write wake file
+        shell: bash
+        run: |
+          mkdir -p .agent-inbox
+          F=".agent-inbox/${{ steps.wake.outputs.kind }}-${{ github.event.discussion.number || github.event.comment.id }}-${{ github.run_id }}.md"
+          cat > "$F" << EOF
+          # Wake: ${{ steps.wake.outputs.title }}
+
+          - **Kind:** ${{ steps.wake.outputs.kind }}
+          - **URL:** ${{ steps.wake.outputs.url }}
+          - **Action:** read the discussion and respond if it addresses your zone.
+
+          ${{ steps.wake.outputs.body }}
+          EOF
+          echo "wrote $F"
+
+      - name: Commit and push wake file
+        shell: bash
+        run: |
+          git config user.name "lumen-bot"
+          git config user.email "lumen-bot@users.noreply.github.com"
+          git add .agent-inbox/
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+          git commit -m "agent-wake: discussion activity [skip ci]"
+          git push

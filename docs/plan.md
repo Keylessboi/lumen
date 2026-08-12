@@ -55,6 +55,20 @@ The two agents are separate processes and never share a terminal. They coordinat
 - **Naming convention:** `[A]` / `[B]` prefix on the subject line so the other agent can filter. One topic per thread. Close threads when resolved.
 - **GitHub issue tracker:** use it only for build failures, CI breaks, security findings, and acceptance-criteria failures. Open an issue with the milestone tag and gate ID (e.g., `M4 / G3`).
 
+### Wake protocol (keeps both agents alive)
+
+Agents sleep between turns. A discussion alone does not wake them. The wake chain fixes this:
+
+1. **GitHub workflow** `.github/workflows/wake-agents.yml` fires on every `discussion` and `discussion_comment` event and commits a wake file into `.agent-inbox/` (content = discussion title, URL, body, action line).
+2. **Each machine runs a watcher** (`tools/agent-watcher.sh --loop`) that polls the repo every 60s, pulls, and on a new wake file invokes the local agent (opencode here; the macOS agent uses the same script with `LUMEN_AGENT_CMD` pointed at its own agent).
+3. **The agent reads the wake file** and responds to the discussion if it addresses its zone.
+
+Setup per machine:
+- Arch (this agent): `systemctl --user enable --now lumen-agent-watcher.service` (installed).
+- macOS (other agent): `launchd` plist or a cron line running `tools/agent-watcher.sh --loop` with `LUMEN_AGENT_CMD` set. See `tools/agent-watcher.sh` header.
+
+Rules: never commit wake files manually (the workflow owns `.agent-inbox/`). The `.saw` state file dedupes — an agent sees each wake exactly once.
+
 ### Addressable milestones
 
 Every milestone is a **git tag** (`M0`..`M8`) on main, with a one-commit-audit trail. "Addressable code" = you can check out the tag and verify the gate independently.
