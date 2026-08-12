@@ -23,11 +23,25 @@ raw events (local, ~30d)  ->  1-min buckets (local, ~6mo)  ->  app-day rollups (
 | events / buckets / rollups | **append-merge** | remove duplicates by (device_id, monotonic seq); immutable; sum across devices |
 | settings / limits / overrides | **LWW + UTC-day** | last write wins per field, tiebreak (device_id, seq); UTC day boundary |
 | **control state** (active focus session, active limit, live nudge) | **latest declarer takes over** | the device that last declared itself the active controller owns the state until a newer declaration supersedes it; tiebreak (device_id, seq); NEVER wall-clock |
+| rollups_local (display day) | **derived, never synced** | per-device derivation from buckets over the display-day window; recomputed from `display.timezone`; not a reconciliation participant |
 
 **NO CRDT. NO last-write-wins by clock time for events.** A device with
 a wrong clock must never silently overwrite data. Server order (pubsub
 item ID / MAM archive ID) is the ordering authority; gaps and jumps
 show a sync-integrity warning instead of silent convergence.
+
+**UTC day is the reconciliation key; the UI presents the device local
+day.** `rollups` stays keyed `(device_id, day_utc, app_key)` — frozen,
+mergeable, the sync unit. The Today screen and trend chart instead sum
+buckets over local-day windows, whose boundary comes from the
+`display.timezone` setting (see `LocalDay` in `core/commonMain`), so all
+devices agree on the day regardless of where each physically is.
+
+**Seam, stated plainly:** changing `display.timezone` re-derives local
+rollups exactly for whatever the bucket window still holds (~6 months).
+Older `rollups_local` rows keep the day they were written under, with
+`utc_offset_min` recording why — a relocation does not rewrite the
+history of days you actually lived elsewhere.
 
 ## Control-state takeover (the "two devices at once" rule)
 
@@ -99,6 +113,16 @@ CREATE TABLE rollups (                    -- kept forever
   total_ms   INTEGER NOT NULL,
   category   TEXT,
   PRIMARY KEY (device_id, day_utc, app_key)
+);
+
+CREATE TABLE rollups_local (              -- display day, derived, NEVER synced
+  device_id      TEXT NOT NULL,
+  day_local      TEXT NOT NULL,           -- 'YYYY-MM-DD' in display.timezone
+  app_key        TEXT NOT NULL,
+  total_ms       INTEGER NOT NULL,
+  utc_offset_min INTEGER NOT NULL,        -- offset in force when written
+  category       TEXT,
+  PRIMARY KEY (device_id, day_local, app_key)
 );
 
 CREATE TABLE settings (                   -- LWW + UTC-day reconciliation
