@@ -3,6 +3,7 @@ package dev.lumen.macos.importer
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
+import dev.lumen.macos.collector.MacSystemUi
 import dev.lumen.macos.permissions.FullDiskAccess
 import java.io.File
 import java.nio.file.Files
@@ -119,6 +120,11 @@ class KnowledgeCImporter(
                     st.executeQuery().use { rs ->
                         while (rs.next()) {
                             val bundle = rs.getString(1)?.takeIf { it.isNotBlank() } ?: continue
+                            // Apple records the lock screen too. Filtering
+                            // only the live path would leave imported history
+                            // full of it — the same two-path mistake I made
+                            // with self-exclusion.
+                            if (MacSystemUi.isSystemUi(AppKey(bundle))) continue
                             val startMs = toEpochMs(rs.getDouble(2))
                             val endMs = toEpochMs(rs.getDouble(3))
                             val duration = endMs - startMs

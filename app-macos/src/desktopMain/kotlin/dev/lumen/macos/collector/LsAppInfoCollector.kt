@@ -65,6 +65,15 @@ class LsAppInfoCollector(
         var last: AppKey? = null
         while (true) {
             val observed = runner.frontmost()
+            // The lock screen and password prompts take the foreground
+            // without the user choosing them — see MacSystemUi. Skipped here
+            // rather than filtered downstream so `last` never becomes a
+            // system id: otherwise returning to the app you were already in
+            // would not register as a change and the session would be lost.
+            if (observed != null && MacSystemUi.isSystemUi(observed.appKey)) {
+                delay(pollInterval)
+                continue
+            }
             if (observed != null && observed.appKey != last) {
                 last = observed.appKey
                 emit(
