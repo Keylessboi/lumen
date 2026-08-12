@@ -183,6 +183,22 @@ class JvmLumenStore private constructor(
     override fun lastAckedSeq(deviceId: DeviceId): Long =
         queries.selectWatermark(deviceId.value).executeAsOneOrNull() ?: 0L
 
+    /**
+     * The highest event seq stored for [deviceId], or -1 when none exist.
+     *
+     * `FocusSessionTracker` numbers from 0 on every launch; without this,
+     * a restart writes seqs 0,1,2... that collide with the existing
+     * `(device_id, seq)` PK and are silently dropped by `INSERT OR IGNORE` —
+     * the day stops growing with no error. Seeding the tracker's nextSeq
+     * from here is the single point where the monotonic counter is owned.
+     */
+    fun lastEventSeq(deviceId: DeviceId): Long =
+        queries.selectEventsAfter(deviceId.value, Long.MIN_VALUE)
+            .executeAsList()
+            .lastOrNull()
+            ?.seq
+            ?: -1L
+
     override fun setAckedSeq(deviceId: DeviceId, seq: Long) {
         queries.upsertWatermark(deviceId.value, seq)
     }

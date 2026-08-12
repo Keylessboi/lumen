@@ -52,7 +52,11 @@ private fun runApp() = application {
         val nameResolver: AppNameResolver = remember { DesktopEntryNameResolver() }
         val store = remember { openStore() }
         val deviceId = remember { resolveDeviceId(store) }
-        val tracker = remember { FocusSessionTracker(deviceId) }
+        // Seed the seq counter from the store: FocusSessionTracker numbers
+        // from 0 on every launch, and the (device_id, seq) PK drops colliding
+        // inserts silently (INSERT OR IGNORE). Without this a restart makes
+        // the day stop growing with no error.
+        val tracker = remember { FocusSessionTracker(deviceId, store.lastEventSeq(deviceId) + 1) }
         val day = remember { DayAccumulator() }
 
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }

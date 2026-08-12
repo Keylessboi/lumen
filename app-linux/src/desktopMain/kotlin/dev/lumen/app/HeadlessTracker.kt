@@ -28,7 +28,10 @@ fun mainHeadless() = runBlocking {
     val collector = HyprlandCollector()
     val store = openStore()
     val deviceId = resolveDeviceId(store)
-    val tracker = FocusSessionTracker(deviceId)
+    // Same seq seeding as the windowed app: without it a tracker restart
+    // resets to seq 0 and every new event collides on the (device_id, seq)
+    // PK, silently dropped by INSERT OR IGNORE — the day stops growing.
+    val tracker = FocusSessionTracker(deviceId, store.lastEventSeq(deviceId) + 1)
 
     if (collector.permissionState() !is dev.lumen.core.collector.PermissionState.Granted) {
         System.err.println("lumen: ${collector.permissionState()}")
