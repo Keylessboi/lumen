@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import dev.lumen.core.model.AppTotal
+import dev.lumen.ui.charts.CategorySlice
+import dev.lumen.ui.charts.CategoryBar
 import dev.lumen.ui.charts.DayBarsSection
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
@@ -54,6 +56,8 @@ fun TodayScreen(
      * `docs/design-spec.md`). Empty hides the section entirely — a platform
      * that cannot yet supply history shows no empty frame.
      */
+    /** Per-category time for today (chart 1 of three). Empty hides it. */
+    categories: List<CategorySlice> = emptyList(),
     recentDays: List<DayTotal> = emptyList(),
     /** Running mean across every complete day on record; null before any. */
     averageMs: Long? = null,
@@ -123,6 +127,11 @@ fun TodayScreen(
             // bottom even with no rows at all.
             Spacer(Modifier.weight(1f))
         } else {
+            if (categories.isNotEmpty()) {
+                CategoryBar(categories)
+                Spacer(Modifier.height(22.dp))
+            }
+
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
             // Resolved for the whole visible set so two rows are not the same
             // colour, and resolved by key so the assignment does not change

@@ -155,6 +155,35 @@ class UsageStore(
             }
     }
 
+    /**
+     * The user's sticky category overrides, one per line as
+     * `app_key<TAB>Category`.
+     *
+     * Append-only like the name cache: the last line for a key wins, so a
+     * change is a write rather than a rewrite, and a crash mid-write costs at
+     * most the line being appended.
+     */
+    fun overrides(): Map<String, String> {
+        val f = File(root, "category-overrides.tsv")
+        if (!f.exists()) return emptyMap()
+        return f.readLines()
+            .mapNotNull { line ->
+                val parts = line.split('\t')
+                if (parts.size == 2 && parts[0].isNotBlank()) parts[0] to parts[1] else null
+            }
+            .toMap()
+    }
+
+    fun setOverride(appKey: AppKey, categoryName: String) {
+        File(root, "category-overrides.tsv").appendText("${appKey.value}\t$categoryName\n")
+    }
+
+    fun clearOverride(appKey: AppKey) {
+        // Written as an explicit tombstone rather than by rewriting the file:
+        // "" is not a category name, so it reads back as absent.
+        File(root, "category-overrides.tsv").appendText("${appKey.value}\t\n")
+    }
+
     /** Remember a human-facing app name. Display only, never synced. */
     fun rememberName(appKey: AppKey, displayName: String?) {
         // Our own dev process reports its main class ("MainKt"). Override at

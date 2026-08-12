@@ -22,6 +22,12 @@ import dev.lumen.macos.startup.LoginItem
 import dev.lumen.macos.store.UsageStore
 import dev.lumen.macos.ui.LumenTrayIcon
 import dev.lumen.core.model.AppTotal
+import dev.lumen.core.category.Category
+import dev.lumen.core.category.CategoryEngine
+import dev.lumen.core.category.GeneratedRegistry
+import dev.lumen.core.category.OverrideStore
+import dev.lumen.core.model.AppKey
+import dev.lumen.ui.charts.CategorySlice
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
 import dev.lumen.ui.HistoryState
@@ -52,6 +58,28 @@ fun main() = application {
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var currentDay by remember { mutableStateOf(store.today()) }
     var averageMs by remember { mutableStateOf<Long?>(null) }
+    var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
+
+    // The user's sticky overrides, read from the store. Registry lookups are
+    // the shipped dataset; an override always wins and survives a dataset
+    // update — see CategoryEngine.
+    val categoryEngine = remember {
+        CategoryEngine(
+            registry = GeneratedRegistry,
+            overrides = object : OverrideStore {
+                override fun override(appKey: AppKey): Category? =
+                    store.overrides()[appKey.value]?.takeIf { it.isNotBlank() }?.let(Category::fromStored)
+                override fun setOverride(appKey: AppKey, category: Category) =
+                    store.setOverride(appKey, category.name)
+                override fun clearOverride(appKey: AppKey) = store.clearOverride(appKey)
+            },
+        )
+    }
+
+    fun categorySlices(dayTotals: List<AppTotal>): List<CategorySlice> =
+        categoryEngine
+            .summarize(dayTotals.associate { it.appKey to it.totalMs })
+            .map { CategorySlice(it.category.displayName, it.totalMs) }
     var selectedDay by remember { mutableStateOf<String?>(null) }
     var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
     var windowVisible by remember { mutableStateOf(!launchedAtLogin()) }
@@ -63,6 +91,7 @@ fun main() = application {
         totals = store.totalsFor(store.today())
         recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
         averageMs = store.runningDailyAverageMs()
+        categories = categorySlices(totals)
 
         // Imported Screen Time history carries bundle ids only, so a month of
         // recovered usage renders as "com.spotify.client". Resolve real names
@@ -75,6 +104,7 @@ fun main() = application {
             .distinct()
         store.resolveMissingNames(visible)
         totals = store.totalsFor(store.today())
+        categories = categorySlices(totals)
         collector.focusChanges().collect { change ->
             store.rememberName(change.appKey, change.displayName)
             tracker.onChange(change)?.let { closed ->
@@ -100,6 +130,7 @@ fun main() = application {
                 // toward today; see liveMs below.
                 currentDay = today
                 totals = store.totalsFor(today)
+                categories = categorySlices(totals)
                 recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
                 // Yesterday just became a complete day, so it now counts.
                 averageMs = store.runningDailyAverageMs()
@@ -107,7 +138,10 @@ fun main() = application {
                 dayDetail = null
                 lastChartRefreshMs = now
             } else {
-                if (totals.isNotEmpty() || liveSinceMs > 0) totals = store.totalsFor(today)
+                if (totals.isNotEmpty() || liveSinceMs > 0) {
+                    totals = store.totalsFor(today)
+                    categories = categorySlices(totals)
+                }
                 // Today's own bar should grow during the day, but re-deriving
                 // a week of totals every second would read every event file
                 // every second. A minute is finer than the chart can show.
@@ -188,6 +222,7 @@ fun main() = application {
         ) {
             TodayScreen(
                 totals = totals,
+                categories = categories,
                 recentDays = recentDays,
                 averageMs = averageMs,
                 selectedDay = selectedDay,

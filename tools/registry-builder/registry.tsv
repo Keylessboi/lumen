@@ -1,0 +1,219 @@
+# Lumen category registry — M6.
+#
+# Format: <app_key>	<category>
+# One line per platform identity: the same app has a bundle id on macOS, a
+# package name on Android and a WM class / desktop-file id on Linux, and they
+# do not agree. Matching is exact and case-insensitive on the key.
+#
+# Curation rules:
+#  - Only apps whose primary use is unambiguous. If a reasonable person would
+#    file it differently, it is left out and lands in Uncategorized. The
+#    locked rule is "never a confident wrong guess", so absence is the safe
+#    answer and the list is deliberately shorter than it could be.
+#  - No judgement categories. There is no Productive and no Distracting.
+#  - Browsers are Browsing even though people work in them, because the
+#    honest answer at the app level is "a browser". Per-site attribution is
+#    post-v1 (docs/directions.md, browser extension).
+#  - IDEs and terminals are Development even when used for writing prose;
+#    that is the dominant case and an override fixes the rest.
+
+# ---- Communication ----
+com.tinyspeck.slackmacgap	Communication
+com.Slack	Communication
+slack	Communication
+com.hnc.Discord	Communication
+discord	Communication
+com.discord	Communication
+com.microsoft.teams2	Communication
+com.microsoft.teams	Communication
+us.zoom.xos	Communication
+us.zoom.videomeetings	Communication
+zoom	Communication
+com.apple.MobileSMS	Communication
+com.apple.iChat	Communication
+com.apple.FaceTime	Communication
+org.telegram.desktop	Communication
+telegram-desktop	Communication
+org.telegram.messenger	Communication
+com.whatsapp	Communication
+whatsapp	Communication
+org.signal.Signal	Communication
+signal-desktop	Communication
+org.thunderbird.Thunderbird	Communication
+thunderbird	Communication
+com.apple.mail	Communication
+com.google.android.gm	Communication
+com.readdle.smartemail	Communication
+im.riot.app	Communication
+element	Communication
+
+# ---- Development ----
+com.microsoft.VSCode	Development
+code	Development
+code-oss	Development
+vscodium	Development
+com.jetbrains.intellij	Development
+jetbrains-idea	Development
+jetbrains-idea-ce	Development
+com.jetbrains.pycharm	Development
+jetbrains-pycharm	Development
+com.jetbrains.WebStorm	Development
+com.jetbrains.goland	Development
+com.jetbrains.rider	Development
+com.jetbrains.CLion	Development
+com.google.android.studio	Development
+android-studio	Development
+com.apple.dt.Xcode	Development
+com.apple.Terminal	Development
+com.googlecode.iterm2	Development
+com.mitchellh.ghostty	Development
+org.alacritty	Development
+alacritty	Development
+kitty	Development
+foot	Development
+wezterm	Development
+org.gnome.Terminal	Development
+konsole	Development
+dev.warp.Warp-Stable	Development
+com.github.Electron	Development
+com.sublimetext.4	Development
+sublime_text	Development
+com.neovide.neovide	Development
+nvim	Development
+vim	Development
+emacs	Development
+com.postmanlabs.mac	Development
+postman	Development
+com.docker.docker	Development
+docker	Development
+com.github.GitHubClient	Development
+com.sourcetreeapp	Development
+com.figma.Desktop	Development
+figma	Development
+
+# ---- Browsing ----
+com.apple.Safari	Browsing
+com.google.Chrome	Browsing
+google-chrome	Browsing
+chromium	Browsing
+org.chromium.Chromium	Browsing
+org.mozilla.firefox	Browsing
+firefox	Browsing
+firefox-esr	Browsing
+com.microsoft.edgemac	Browsing
+microsoft-edge	Browsing
+com.brave.Browser	Browsing
+brave-browser	Browsing
+company.thebrowser.Browser	Browsing
+com.operasoftware.Opera	Browsing
+opera	Browsing
+org.qutebrowser.qutebrowser	Browsing
+com.vivaldi.Vivaldi	Browsing
+com.android.chrome	Browsing
+
+# ---- Media ----
+com.spotify.client	Media
+spotify	Media
+com.apple.Music	Media
+com.apple.TV	Media
+com.apple.QuickTimePlayerX	Media
+org.videolan.vlc	Media
+vlc	Media
+com.netflix.Netflix	Media
+com.netflix.mediaclient	Media
+com.google.android.youtube	Media
+com.apple.podcasts	Media
+mpv	Media
+io.mpv.Mpv	Media
+com.plexapp.plex	Media
+plexmediaplayer	Media
+com.obsproject.obs-studio	Media
+obs	Media
+com.adobe.LightroomClassicCC7	Media
+com.adobe.Photoshop	Media
+gimp	Media
+org.gimp.GIMP	Media
+org.kde.kdenlive	Media
+com.apple.FinalCut	Media
+com.blackmagic-design.DaVinciResolve	Media
+org.blender.Blender	Media
+blender	Media
+com.apple.Photos	Media
+
+# ---- Reading ----
+com.apple.Preview	Reading
+org.pwmt.zathura	Reading
+zathura	Reading
+com.readdle.PDFExpert-Mac	Reading
+com.amazon.Kindle	Reading
+com.apple.iBooks	Reading
+org.zotero.zotero	Reading
+zotero	Reading
+com.reederapp.5.macOS	Reading
+com.apple.news	Reading
+org.gnome.Evince	Reading
+evince	Reading
+okular	Reading
+com.instapaper.Instapaper	Reading
+com.pocket.Pocket	Reading
+
+# ---- Writing ----
+com.apple.Notes	Writing
+com.apple.iWork.Pages	Writing
+com.microsoft.Word	Writing
+com.notion.id	Writing
+notion-app	Writing
+md.obsidian	Writing
+obsidian	Writing
+com.lukilabs.lukiapp	Writing
+com.ulyssesapp.mac	Writing
+com.literatureandlatte.scrivener3	Writing
+org.libreoffice.script	Writing
+libreoffice-writer	Writing
+libreoffice	Writing
+com.microsoft.onenote.mac	Writing
+com.agiletortoise.Drafts-OSX	Writing
+org.gnome.gedit	Writing
+gedit	Writing
+
+# ---- Games ----
+com.valvesoftware.steam	Games
+steam	Games
+com.epicgames.launcher	Games
+com.mojang.minecraftpe	Games
+minecraft-launcher	Games
+lutris	Games
+net.lutris.Lutris	Games
+com.blizzard.WorldOfWarcraft	Games
+org.prismlauncher.PrismLauncher	Games
+heroic	Games
+com.heroicgameslauncher.hgl	Games
+
+# ---- Utilities ----
+com.apple.finder	Utilities
+org.gnome.Nautilus	Utilities
+nautilus	Utilities
+dolphin	Utilities
+thunar	Utilities
+com.apple.systempreferences	Utilities
+gnome-control-center	Utilities
+systemsettings	Utilities
+com.apple.ActivityMonitor	Utilities
+gnome-system-monitor	Utilities
+com.apple.calculator	Utilities
+com.apple.iCal	Utilities
+com.apple.reminders	Utilities
+com.flexibits.fantastical2.mac	Utilities
+com.agilebits.onepassword7	Utilities
+com.1password.1password	Utilities
+1password	Utilities
+org.keepassxc.KeePassXC	Utilities
+keepassxc	Utilities
+com.bitwarden.desktop	Utilities
+bitwarden	Utilities
+com.apple.AppStore	Utilities
+com.apple.ScreenSharing	Utilities
+org.remmina.Remmina	Utilities
+remmina	Utilities
+com.transmissionbt.transmission	Utilities
+transmission-gtk	Utilities
