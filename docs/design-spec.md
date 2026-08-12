@@ -96,6 +96,9 @@ Exactly three chart types in v1 (no more):
   service). Linux = install + autostart. If v1 ties that to account
   creation, we lose 80% of users in 90 seconds — so first run stays
   local and account is opt-in.
-- The app must exclude ITSELF from its own numbers correctly from day
-  one, or no number can be trusted.
+- The app INCLUDES its own screen time in the numbers, and states it
+  plainly. This matches platform norms — iOS Screen Time counts the
+  Screen Time app, Android Digital Wellbeing counts itself — and hiding
+  your own usage would be the kind of flattering lie a mirror must not
+  tell. Lumen's own window is just another row.
 - Charts that lie = uninstall. Numbers and charts must agree.

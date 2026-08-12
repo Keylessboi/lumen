@@ -37,9 +37,6 @@ class UsageStatsCollector(
     private val usageStatsManager: UsageStatsManager =
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
-    /** The app's own package — excluded from reported focus (design-spec). */
-    override val selfAppKey: AppKey = AppKey(context.packageName)
-
     override val capabilities = CollectorCapabilities(
         isRealtime = false,
         canBackfill = true,
