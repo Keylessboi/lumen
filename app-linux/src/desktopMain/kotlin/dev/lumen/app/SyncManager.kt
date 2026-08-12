@@ -71,15 +71,16 @@ class SyncManager(
         val sk = X25519PrivateKeyParameters(keyPair.privateKeyHandle)
         val pk = X25519PublicKeyParameters(keyPair.publicKey)
 
+        // v1 is device-to-server-to-self: records are encrypted to the
+        // account's OWN keypair, so the resolver serves the local public
+        // key. Multi-device fan-out (peer keys from the devices table,
+        // wrappedKeys in the envelope) is the later milestone — the
+        // resolver is the extension point where that lands.
         val e2ee = CryptoBoxE2EE(
             senderDeviceId = deviceId,
             senderSk = sk,
             senderPk = pk,
-            // Peer keys come from the same keychain seam (multi-device is
-            // a later milestone; the resolver is the extension point).
-            publicKeyResolver = { peer ->
-                X25519PublicKeyParameters(keychain.peerPublicKey(peer))
-            },
+            publicKeyResolver = { _ -> pk },
         )
 
         val xmpp = XmppTransport(
@@ -113,7 +114,3 @@ data class AccountConfig(
     val jid: String,
     val password: String,
 )
-
-/** Peer public-key lookup for [CryptoBoxE2EE] (keychain seam). */
-fun LinuxKeychain.peerPublicKey(deviceId: DeviceId): ByteArray =
-    error("peer key lookup not wired — multi-device sync is a later milestone")

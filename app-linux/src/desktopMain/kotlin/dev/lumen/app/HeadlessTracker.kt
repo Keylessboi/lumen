@@ -8,7 +8,9 @@ import dev.lumen.core.model.Setting
 import dev.lumen.core.rollup.RollupEngine
 import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.core.store.JvmLumenStore
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -38,12 +40,33 @@ fun mainHeadless() = runBlocking {
         return@runBlocking
     }
 
+    // Periodic sync (M4): runs alongside tracking, only when an account is
+    // configured. 'Sync additive, never a dependency' — an unconfigured
+    // install simply never enters this loop.
+    val syncManager = SyncManager(store, deviceId)
+    launch {
+        while (true) {
+            delay(SYNC_INTERVAL_MS)
+            if (!syncManager.isConfigured()) continue
+            runCatching {
+                val report = syncManager.syncOnce()
+                if (report.integrityWarnings.isNotEmpty()) {
+                    System.err.println("lumen: sync integrity warnings: ${report.integrityWarnings}")
+                }
+            }.onFailure { e ->
+                System.err.println("lumen: sync failed: ${e.message}")
+            }
+        }
+    }
+
     collector.focusChanges().collect { change ->
         tracker.onChange(change)?.let { closed ->
             persistEvent(store, closed)
         }
     }
 }
+
+private const val SYNC_INTERVAL_MS = 5L * 60 * 1000 // every 5 minutes
 
 /** Open (or create) the database at the standard data location. */
 private fun openStore(): JvmLumenStore {
