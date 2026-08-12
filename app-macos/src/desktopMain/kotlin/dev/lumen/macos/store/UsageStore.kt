@@ -63,6 +63,37 @@ class UsageStore(
         File(root, "import-watermark").writeText(atMs.toString())
     }
 
+    /**
+     * The start of Lumen's own coverage — the earliest event it recorded
+     * itself — or null when it has recorded nothing yet.
+     *
+     * This is the boundary the Screen Time import must not cross. Apple has
+     * been recording the same apps all along, so re-importing a period Lumen
+     * already tracked counts it twice and inflates every number for that day.
+     * Before this point is history Lumen genuinely missed; after it is a
+     * duplicate.
+     */
+    fun earliestEventMs(): Long? =
+        (root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
+            .asSequence()
+            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
+            .minOfOrNull { it.startedAtMs }
+
+    /**
+     * One past the highest seq the store holds, so an import continues the
+     * sequence rather than restarting it.
+     *
+     * Harmless in this NDJSON cache, which never reads seq — but
+     * `(device_id, seq)` is the primary key in `LumenStore`, and colliding
+     * seqs there would be silently dropped by `INSERT OR IGNORE` when
+     * app-macos migrates.
+     */
+    fun nextSeq(): Long =
+        ((root.listFiles { f -> f.name.startsWith("events-") && f.name.endsWith(".ndjson") } ?: emptyArray())
+            .asSequence()
+            .flatMap { readEvents(it.name.removePrefix("events-").removeSuffix(".ndjson")).asSequence() }
+            .maxOfOrNull { it.seq } ?: -1L) + 1L
+
     /** Append a batch, advancing the import watermark to the newest event taken. */
     fun appendImported(events: List<FocusEvent>) {
         if (events.isEmpty()) return

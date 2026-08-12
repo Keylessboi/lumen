@@ -157,14 +157,45 @@ fun main() = application {
                 onImport = {
                     val since = store.importWatermark().takeIf { it > 0L }
                         ?: (System.currentTimeMillis() - DEFAULT_IMPORT_WINDOW_MS)
-                    history = when (val r = KnowledgeCImporter(deviceId).import(since)) {
+                    // Stop where Lumen's own tracking begins. Apple recorded
+                    // the same apps over the same period, so importing past
+                    // this point counts that time twice.
+                    val until = store.earliestEventMs() ?: System.currentTimeMillis()
+                    val result = KnowledgeCImporter(deviceId)
+                        .import(sinceMs = since, untilMs = until, startSeq = store.nextSeq())
+                    history = when (val r = result) {
                         is KnowledgeCImporter.Result.Imported -> {
                             store.appendImported(r.events)
-                            totals = store.totalsFor(UtcDay.today())
+                            val today = UtcDay.today()
+                            totals = store.totalsFor(today)
                             if (r.events.isEmpty()) {
                                 HistoryState.Message("No new history to import.")
                             } else {
-                                HistoryState.Message("Imported ${r.events.size} sessions.")
+                                // Say where it went. Most of an import lands on
+                                // days the Today screen does not show, and
+                                // "Imported 319 sessions" next to an unchanged
+                                // number reads as a lie.
+                                val days = r.events.map { UtcDay.dayOf(it.startedAtMs) }.distinct()
+                                val onToday = r.events
+                                    .filter { UtcDay.dayOf(it.startedAtMs) == today }
+                                    .sumOf { it.durationMs }
+                                val earlier = r.events.sumOf { it.durationMs } - onToday
+                                HistoryState.Message(
+                                    buildString {
+                                        append("Imported ${formatDuration(onToday + earlier)} ")
+                                        append("across ${days.size} ")
+                                        append(if (days.size == 1) "day" else "days")
+                                        append(".")
+                                        if (onToday > 0) {
+                                            append(" ${formatDuration(onToday)} of it is today")
+                                            append(" and is in the numbers above.")
+                                        }
+                                        if (earlier > 0) {
+                                            append(" The rest is earlier days, saved but not")
+                                            append(" shown yet — Today is currently the only screen.")
+                                        }
+                                    },
+                                )
                             }
                         }
                         KnowledgeCImporter.Result.PermissionDenied -> HistoryState.Offer

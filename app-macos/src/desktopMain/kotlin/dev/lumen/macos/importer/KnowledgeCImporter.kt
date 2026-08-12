@@ -32,9 +32,13 @@ import java.sql.DriverManager
  *
  * ## What it reads
  *
- * Rows in `ZOBJECT` whose `ZSTREAMNAME` is `/app/inFocus`: one row per
- * foreground period, with the app's bundle id in `ZVALUESTRING` and Core Data
- * timestamps in `ZSTARTDATE` / `ZENDDATE`.
+ * Rows in `ZOBJECT` whose `ZSTREAMNAME` is the foreground-time stream: one row
+ * per foreground period, with the app's bundle id in `ZVALUESTRING` and Core
+ * Data timestamps in `ZSTARTDATE` / `ZENDDATE`.
+ *
+ * The stream is **not** a fixed name — macOS renamed it, and current systems
+ * use `/app/usage` where older ones used `/app/inFocus`. It is resolved
+ * against the actual store at import time; see [focusStream].
  *
  * Nothing else is read. The Knowledge store also contains web usage, device
  * activity and more; Lumen imports app focus and ignores the rest.
@@ -47,7 +51,24 @@ class KnowledgeCImporter(
     /** Core Data reference date: 2001-01-01T00:00:00Z, in epoch seconds. */
     private val cocoaEpochOffsetSeconds = 978_307_200L
 
-    fun import(sinceMs: Long, startSeq: Long = 0L): Result {
+    /**
+     * Import foreground sessions that started in `[sinceMs, untilMs)`.
+     *
+     * [untilMs] exists to stop the import double-counting. Apple has been
+     * recording the same apps Lumen records, so any period Lumen already
+     * tracked itself exists twice — once from the live collector, once in the
+     * Knowledge store — and appending both inflates every number for that
+     * period. The caller passes the start of Lumen's own coverage; everything
+     * before it is history Lumen genuinely missed, everything after it is a
+     * duplicate.
+     *
+     * [startSeq] must continue the store's existing sequence. Imported events
+     * sharing a seq range with live ones is harmless in the NDJSON cache,
+     * which never reads seq — but the moment `app-macos` moves to
+     * `LumenStore`, `(device_id, seq)` is the primary key and `INSERT OR
+     * IGNORE` would silently drop every colliding row.
+     */
+    fun import(sinceMs: Long, untilMs: Long = Long.MAX_VALUE, startSeq: Long = 0L): Result {
         // Probe the actual source rather than a global permission flag: the
         // file either opens or it doesn't, and that answer is the truth on any
         // Mac regardless of how TCC was configured.
@@ -64,7 +85,18 @@ class KnowledgeCImporter(
             DriverManager.getConnection("jdbc:sqlite:${copy.absolutePath}?open_mode=1").use { conn ->
                 if (!hasExpectedSchema(conn)) return Result.SchemaUnrecognised
 
+                // Which stream carries app foreground time varies by macOS
+                // version, so resolve it against the actual store instead of
+                // assuming. A store with none of them is an unrecognised
+                // schema, NOT an empty import — see [focusStream].
+                val stream = focusStream(conn) ?: return Result.SchemaUnrecognised
+
                 val cutoffCocoa = (sinceMs / 1000.0) - cocoaEpochOffsetSeconds
+                val untilCocoa = if (untilMs == Long.MAX_VALUE) {
+                    Double.MAX_VALUE
+                } else {
+                    (untilMs / 1000.0) - cocoaEpochOffsetSeconds
+                }
                 val events = mutableListOf<FocusEvent>()
                 var seq = startSeq
 
@@ -72,15 +104,18 @@ class KnowledgeCImporter(
                     """
                     SELECT ZVALUESTRING, ZSTARTDATE, ZENDDATE
                     FROM ZOBJECT
-                    WHERE ZSTREAMNAME = '/app/inFocus'
+                    WHERE ZSTREAMNAME = ?
                       AND ZSTARTDATE IS NOT NULL
                       AND ZENDDATE IS NOT NULL
                       AND ZVALUESTRING IS NOT NULL
                       AND ZSTARTDATE >= ?
+                      AND ZSTARTDATE < ?
                     ORDER BY ZSTARTDATE ASC
                     """.trimIndent(),
                 ).use { st ->
-                    st.setDouble(1, cutoffCocoa)
+                    st.setString(1, stream)
+                    st.setDouble(2, cutoffCocoa)
+                    st.setDouble(3, untilCocoa)
                     st.executeQuery().use { rs ->
                         while (rs.next()) {
                             val bundle = rs.getString(1)?.takeIf { it.isNotBlank() } ?: continue
@@ -144,6 +179,38 @@ class KnowledgeCImporter(
         return dest
     }
 
+    /**
+     * The `ZSTREAMNAME` carrying per-app foreground time, or null if this
+     * store has none of the ones we know about.
+     *
+     * macOS moved this. On the machine this was found on (macOS 26), app time
+     * lives in **`/app/usage`** and `/app/inFocus` does not exist at all —
+     * `SELECT COUNT(*) ... WHERE ZSTREAMNAME='/app/inFocus'` returns 0 while
+     * `/app/usage` holds 1675 rows of exactly the same shape. Older systems
+     * (and iOS-derived stores) use `/app/inFocus`, so both are probed, most
+     * recent naming first.
+     *
+     * Only ONE stream is ever used. If a future macOS ships both, querying
+     * them together would double-count every session.
+     *
+     * Returning null here is what makes a naming change loud. Previously the
+     * stream name was inlined in the query and the schema check only verified
+     * that `ZOBJECT` had the right *columns* — which it does on every macOS —
+     * so an unknown stream sailed past the guard and produced
+     * `Imported(emptyList())`. The user saw "No new history to import", which
+     * is indistinguishable from "you have no history". That is precisely the
+     * silent-zeros failure this class's own header promises not to have.
+     */
+    private fun focusStream(conn: java.sql.Connection): String? =
+        KNOWN_FOCUS_STREAMS.firstOrNull { stream ->
+            conn.prepareStatement(
+                "SELECT 1 FROM ZOBJECT WHERE ZSTREAMNAME = ? LIMIT 1",
+            ).use { st ->
+                st.setString(1, stream)
+                st.executeQuery().use { it.next() }
+            }
+        }
+
     /** Confirms ZOBJECT exists and carries the columns this import depends on. */
     private fun hasExpectedSchema(conn: java.sql.Connection): Boolean {
         return try {
@@ -166,6 +233,14 @@ class KnowledgeCImporter(
         } catch (_: Exception) {
             false
         }
+    }
+
+    private companion object {
+        /**
+         * Foreground-time streams, most recent macOS naming first. See
+         * [focusStream] for why this is a list and why only one is used.
+         */
+        val KNOWN_FOCUS_STREAMS = listOf("/app/usage", "/app/inFocus")
     }
 
     sealed interface Result {
