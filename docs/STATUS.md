@@ -1,8 +1,8 @@
 # Lumen — Repo Status
 
-**Updated:** 2026-08-12. Head `b35e582`. Tags: `M0`, `M1`.
+**Updated:** 2026-08-12. Head `0b7dff0` (+ #48). Tags: `M0`, `M1`.
 
-`./gradlew build` is green, including `:app-android`. **326 tests, 0 failed.**
+`./gradlew build` is green, including `:app-android`. **350 tests, 0 failed.**
 
 ## Where v1 actually stands
 
@@ -13,7 +13,7 @@ Mac, and they are the three with hardware in them.
 
 | Gate | State |
 |---|---|
-| `G1` Linux slice | collector written and previously verified live by A; **not re-verified since the dedupe/title fixes** |
+| `G1` Linux slice | collector written and previously verified live by A; **not re-verified since the dedupe/title fixes**; Sway + X11 collectors landed (#48), store wired to SQLite (#48) |
 | `G2` Android slice | collector written, **compile-verified only** — no device has ever run it |
 | `G3` sync + E2EE | **not started.** No XMPP client exists |
 | `G4` export/migrate | **met in code**: format, Argon2id + AES-GCM, UI, atomic writes, round-trip tested |
@@ -28,7 +28,7 @@ Mac, and they are the three with hardware in them.
 | `:core` commonTest | contract suite, 209 tests | B |
 | `:ui` | **shared** Today screen, charts, export section — all three apps render it | B |
 | `:transport-xmpp` | **empty.** No client code | A |
-| `:app-linux` | Hyprland collector + shared UI; in-memory store pending `LumenStore` | A |
+| `:app-linux` | Hyprland + Sway + X11 collectors, shared UI, **SQLite store wired** (#48) | A |
 | `:app-android` | UsageStats collector + shared UI; in-memory store pending `LumenStore` | A |
 | `:app-macos` | full local slice: collector, Screen Time import, NDJSON store, menu bar, categories, nudge, export | B |
 
@@ -73,8 +73,9 @@ render `:ui`. (#35)
 
 - **M4 is the biggest unbuilt piece.** No XMPP client, no IBR, no provider
   picker, no sync engine, no E2EE implementation behind the seam.
-- M2: Sway and X11 collectors. Hyprland needs re-verifying after the dedupe
-  and title fixes.
+- M2: Sway and X11 collectors **landed** (#48). JvmLumenStore wired into
+  app-linux (#48). Hyprland needs re-verifying after the dedupe and title
+  fixes.
 - M3: the device matrix. Nothing Android has run on hardware.
 - `androidMain` Keystore.
 
@@ -97,5 +98,4 @@ matrix and does not exist. No acceptance criterion has been formally ticked.
 - **The Android collector has never run on a device.** Whether
   `KEYGUARD_SHOWN` fires reliably across OEMs is exactly what M3 exists to
   answer.
-- **`app-linux` and `app-android` store in memory.** The surface is real; the
-  persistence behind it is not.
+- **`app-linux` stores to SQLite** (#48). `app-android` still stores in memory.
