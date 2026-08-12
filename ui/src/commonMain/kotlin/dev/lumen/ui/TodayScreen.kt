@@ -1,4 +1,4 @@
-package dev.lumen.macos.ui
+package dev.lumen.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.lumen.macos.store.AppTotal
 
 /**
  * Today — the only screen that decides whether a user stays

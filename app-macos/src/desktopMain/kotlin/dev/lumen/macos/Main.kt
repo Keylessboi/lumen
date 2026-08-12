@@ -19,12 +19,12 @@ import dev.lumen.macos.importer.KnowledgeCImporter
 import dev.lumen.macos.permissions.FullDiskAccess
 import dev.lumen.macos.session.FocusSessionTracker
 import dev.lumen.macos.startup.LoginItem
-import dev.lumen.macos.store.AppTotal
 import dev.lumen.macos.store.UsageStore
-import dev.lumen.macos.ui.HistoryState
 import dev.lumen.macos.ui.LumenTrayIcon
-import dev.lumen.macos.ui.TodayScreen
-import dev.lumen.macos.ui.formatDuration
+import dev.lumen.ui.AppTotal
+import dev.lumen.ui.HistoryState
+import dev.lumen.ui.TodayScreen
+import dev.lumen.ui.formatDuration
 import kotlinx.coroutines.delay
 
 /**

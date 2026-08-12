@@ -1,4 +1,4 @@
-package dev.lumen.macos.ui
+package dev.lumen.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

@@ -2,6 +2,7 @@ package dev.lumen.macos.store
 
 import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.model.AppKey
+import dev.lumen.ui.AppTotal
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.rollup.RollupEngine
@@ -143,8 +144,3 @@ class UsageStore(
 }
 
 /** A single app's total for a day. [displayName] falls back to the bundle id. */
-data class AppTotal(
-    val appKey: AppKey,
-    val displayName: String,
-    val totalMs: Long,
-)
