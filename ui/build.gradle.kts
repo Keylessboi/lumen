@@ -50,6 +50,10 @@ kotlin {
                 implementation(compose.foundation)
                 implementation(compose.material3)
                 implementation(compose.ui)
+                // Weekday and month names for the trend chart's axis. Derived
+                // in :ui rather than by each platform so the labels cannot
+                // drift between Linux, Android and macOS.
+                implementation(libs.kotlinx.datetime)
             }
         }
         val commonTest by getting {

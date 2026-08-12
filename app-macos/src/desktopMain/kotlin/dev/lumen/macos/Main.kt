@@ -22,6 +22,7 @@ import dev.lumen.macos.startup.LoginItem
 import dev.lumen.macos.store.UsageStore
 import dev.lumen.macos.ui.LumenTrayIcon
 import dev.lumen.ui.AppTotal
+import dev.lumen.ui.charts.DayTotal
 import dev.lumen.ui.HistoryState
 import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.formatDuration
@@ -43,6 +44,7 @@ fun main() = application {
     val collector = remember { LsAppInfoCollector() }
 
     var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
+    var recentDays by remember { mutableStateOf(emptyList<DayTotal>()) }
     var liveApp by remember { mutableStateOf<String?>(null) }
     var liveSinceMs by remember { mutableStateOf(0L) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -53,6 +55,7 @@ fun main() = application {
     // a view onto it; hiding the window must not stop tracking.
     LaunchedEffect(Unit) {
         totals = store.totalsFor(UtcDay.today())
+        recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
         collector.focusChanges().collect { change ->
             store.rememberName(change.appKey, change.displayName)
             tracker.onChange(change)?.let { closed ->
@@ -137,6 +140,7 @@ fun main() = application {
         ) {
             TodayScreen(
                 totals = totals,
+                recentDays = recentDays,
                 totalMs = totalMs,
                 liveApp = liveApp,
                 reducedMotion = reducedMotionEnabled(),
@@ -168,6 +172,9 @@ fun main() = application {
                             store.appendImported(r.events)
                             val today = UtcDay.today()
                             totals = store.totalsFor(today)
+                            // The whole point of an import is the days behind
+                            // today, so refresh the trend view too.
+                            recentDays = store.dailyTotals(HISTORY_WINDOW_DAYS)
                             if (r.events.isEmpty()) {
                                 HistoryState.Message("No new history to import.")
                             } else {
@@ -191,8 +198,8 @@ fun main() = application {
                                             append(" and is in the numbers above.")
                                         }
                                         if (earlier > 0) {
-                                            append(" The rest is earlier days, saved but not")
-                                            append(" shown yet — Today is currently the only screen.")
+                                            append(" The rest is earlier days — see Recent days")
+                                            append(" below.")
                                         }
                                     },
                                 )
@@ -225,6 +232,9 @@ private fun launchedAtLogin(): Boolean =
     System.getenv("XPC_SERVICE_NAME")?.contains(LoginItem.LABEL) == true
 
 /** How far back a first import reaches. The store rarely holds more than this. */
+/** Chart 3 in docs/design-spec.md is "7/30-day bars"; 7 is the calm default. */
+private const val HISTORY_WINDOW_DAYS = 7
+
 private const val DEFAULT_IMPORT_WINDOW_MS = 30L * 24 * 3_600_000
 
 /**
