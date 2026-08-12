@@ -55,9 +55,10 @@ class SerializationContractTest {
     }
 
     @Test
-    fun `Setting round-trips field-wise`() {
-        // Setting holds a ByteArray, so data-class equality is identity-based
-        // and cannot be used here — compare the bytes explicitly.
+    fun `Setting round-trips`() {
+        // Compared directly: Setting has value equality as of #19. This used
+        // to need a field-by-field comparison because ByteArray defeated the
+        // generated equals.
         val setting = Setting(
             key = "nudge.break.enabled",
             value = byteArrayOf(1, 0, -128, 127),
@@ -65,22 +66,13 @@ class SerializationContractTest {
             updatedDayUtc = "2026-06-15",
             deviceId = device,
         )
-        val decoded = json.decodeFromString<Setting>(json.encodeToString(setting))
-        assertEquals(setting.key, decoded.key)
-        assertTrue(setting.value.contentEquals(decoded.value), "setting bytes must survive the round-trip")
-        assertEquals(setting.updatedAtMs, decoded.updatedAtMs)
-        assertEquals(setting.updatedDayUtc, decoded.updatedDayUtc)
-        assertEquals(setting.deviceId, decoded.deviceId)
+        assertEquals(setting, json.decodeFromString<Setting>(json.encodeToString(setting)))
     }
 
     @Test
-    fun `SyncRecord round-trips field-wise`() {
+    fun `SyncRecord round-trips`() {
         val record = SyncRecord(device, 9L, RecordKind.EVENT, byteArrayOf(4, 8, 15, 16, 23, 42))
-        val decoded = json.decodeFromString<SyncRecord>(json.encodeToString(record))
-        assertEquals(record.deviceId, decoded.deviceId)
-        assertEquals(record.seq, decoded.seq)
-        assertEquals(record.kind, decoded.kind)
-        assertTrue(record.payload.contentEquals(decoded.payload))
+        assertEquals(record, json.decodeFromString<SyncRecord>(json.encodeToString(record)))
     }
 
     @Test

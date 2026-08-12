@@ -91,7 +91,32 @@ data class Setting(
     val updatedAtMs: Long,
     val updatedDayUtc: String,
     val deviceId: DeviceId,
-)
+) {
+    // ByteArray uses identity equality, so the generated equals/hashCode
+    // would report two byte-identical Settings as different. That breaks
+    // dedupe, Set/Map membership, and — most sharply — the M5 export
+    // round-trip, whose entire job is "the same data comes back".
+    // hashCode is also unstable across processes with the generated version,
+    // which makes any cache keyed on one non-deterministic.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Setting) return false
+        return key == other.key &&
+            value.contentEquals(other.value) &&
+            updatedAtMs == other.updatedAtMs &&
+            updatedDayUtc == other.updatedDayUtc &&
+            deviceId == other.deviceId
+    }
+
+    override fun hashCode(): Int {
+        var result = key.hashCode()
+        result = 31 * result + value.contentHashCode()
+        result = 31 * result + updatedAtMs.hashCode()
+        result = 31 * result + updatedDayUtc.hashCode()
+        result = 31 * result + deviceId.hashCode()
+        return result
+    }
+}
 
 /**
  * A day's total for one app, in the user's own day (discussion #29).
@@ -124,7 +149,27 @@ data class SyncRecord(
     val seq: Long,
     val kind: RecordKind,
     val payload: ByteArray,
-)
+) {
+    // See Setting: ByteArray defeats the generated equals/hashCode.
+    // SyncRecord is the wire unit, so a Set<SyncRecord> that silently keeps
+    // duplicates is the failure mode closest to real data loss.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is SyncRecord) return false
+        return deviceId == other.deviceId &&
+            seq == other.seq &&
+            kind == other.kind &&
+            payload.contentEquals(other.payload)
+    }
+
+    override fun hashCode(): Int {
+        var result = deviceId.hashCode()
+        result = 31 * result + seq.hashCode()
+        result = 31 * result + kind.hashCode()
+        result = 31 * result + payload.contentHashCode()
+        return result
+    }
+}
 
 enum class RecordKind {
     EVENT,

@@ -46,7 +46,40 @@ data class EncryptedPayload(
     val ciphertext: ByteArray,
     val wrappedKeys: Map<DeviceId, ByteArray> = emptyMap(),
     val padding: Int = 0,
-)
+) {
+    // ByteArray identity equality again — and here it matters for a
+    // security-relevant reason: comparing two envelopes to check a replay,
+    // or holding received envelopes in a Set to dedupe, would silently do
+    // nothing. Note this is a plain structural comparison, NOT constant
+    // time; it is for equality of records, never for authenticating one.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is EncryptedPayload) return false
+        if (version != other.version) return false
+        if (senderDeviceId != other.senderDeviceId) return false
+        if (!nonce.contentEquals(other.nonce)) return false
+        if (!ciphertext.contentEquals(other.ciphertext)) return false
+        if (padding != other.padding) return false
+        if (wrappedKeys.keys != other.wrappedKeys.keys) return false
+        return wrappedKeys.all { (device, key) ->
+            other.wrappedKeys[device]?.contentEquals(key) == true
+        }
+    }
+
+    override fun hashCode(): Int {
+        var result = version
+        result = 31 * result + senderDeviceId.hashCode()
+        result = 31 * result + nonce.contentHashCode()
+        result = 31 * result + ciphertext.contentHashCode()
+        result = 31 * result + padding
+        // Order-independent, because Map iteration order is not part of
+        // equality above.
+        result = 31 * result + wrappedKeys.entries.sumOf {
+            it.key.hashCode() xor it.value.contentHashCode()
+        }
+        return result
+    }
+}
 
 /**
  * Platform keychain abstraction. Android: hardware-wrapped at rest
