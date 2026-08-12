@@ -170,6 +170,25 @@ private fun runApp() = application {
             }
         }
 
+        // Periodic sync (M4): same loop as the headless tracker, so the
+        // windowed app also pushes/pulls when an account is configured.
+        // 'Sync additive, never a dependency' — unconfigured = no loop.
+        LaunchedEffect(Unit) {
+            val syncManager = SyncManager(store, deviceId)
+            while (true) {
+                delay(SYNC_INTERVAL_MS)
+                if (!syncManager.isConfigured()) continue
+                runCatching {
+                    val report = syncManager.syncOnce()
+                    if (report.integrityWarnings.isNotEmpty()) {
+                        println("lumen: sync integrity warnings: ${report.integrityWarnings}")
+                    }
+                }.onFailure { e ->
+                    println("lumen: sync failed: ${e.message}")
+                }
+            }
+        }
+
         LaunchedEffect(Unit) {
             var lastDay = UtcDay.today()
             while (true) {
@@ -238,10 +257,11 @@ private fun runApp() = application {
     }
 }
 
+private const val SYNC_INTERVAL_MS = 5L * 60 * 1000 // every 5 minutes, matching the headless tracker
+
 private fun openStore(): JvmLumenStore {
     val dataDir = File(System.getProperty("user.home"), ".local/share/lumen")
-    return JvmLumenStore.open(File(dataDir, "lumen.db"))
-}
+    return JvmLumenStore.open(File(dataDir, "lumen.db"))}
 
 private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
     val existing = store.setting("device_id")
