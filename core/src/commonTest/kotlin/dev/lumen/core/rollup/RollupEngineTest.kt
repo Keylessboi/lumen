@@ -5,7 +5,6 @@ import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.MinuteBucket
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -17,10 +16,9 @@ import kotlin.test.assertTrue
  * rule in `docs/data-model.md`'s event -> 1-min bucket -> app-day rollup
  * chain is checkable without a database.
  *
- * Two tests are `@Ignore`d pending issue #15 (`rollup()` keeps only the
- * largest app and invents an empty-AppKey row for empty input). They are
- * written against the corrected contract and un-ignored when the fix lands;
- * see the issue for why this is a pre-M1-freeze blocker.
+ * The two rollup tests that were `@Ignore`d against #15 are live as of the
+ * freeze amendment in `ead5e76` — `rollup()` now returns
+ * `List<AppDayRollup>` and no longer fabricates a blank-`AppKey` row.
  */
 class RollupEngineTest {
 
@@ -169,6 +167,10 @@ class RollupEngineTest {
     }
 
     // ---- rollup(): buckets -> per-app-day totals ----
+    //
+    // These were @Ignore'd against #15 and are live as of `ead5e76`, where
+    // rollup() became List<AppDayRollup>. They are the reason the signature
+    // changed, so they are the tests that must not be allowed to soften.
 
     @Test
     fun `a single-app day rolls up to that app's total`() {
@@ -177,7 +179,7 @@ class RollupEngineTest {
             MinuteBucket(device, alignedStart + minute, safari, minute),
             MinuteBucket(device, alignedStart + 2 * minute, safari, 30_000L),
         )
-        val produced = RollupEngine.rollup(device, day, buckets)
+        val produced = RollupEngine.rollup(device, day, buckets).single()
         assertEquals(safari, produced.appKey)
         assertEquals(2 * minute + 30_000L, produced.totalMs)
         assertEquals(device, produced.deviceId)
@@ -190,33 +192,72 @@ class RollupEngineTest {
         // snapshot into the rollup would make a re-categorisation silently
         // wrong for all history.
         val buckets = listOf(MinuteBucket(device, alignedStart, safari, minute))
-        assertEquals(null, RollupEngine.rollup(device, day, buckets).category)
+        assertEquals(null, RollupEngine.rollup(device, day, buckets).single().category)
     }
 
     @Test
-    @Ignore("Blocked on #15 — rollup() keeps only the largest app, so a day's total is the max, not the sum.")
-    fun `a day with three apps totals all three`() {
+    fun `a day with three apps reports all three`() {
+        // The #15 regression. maxByOrNull kept only Safari and silently
+        // dropped the rest, so a day's total was its largest app.
         val buckets = listOf(
             MinuteBucket(device, alignedStart, safari, 2 * 3_600_000L),
             MinuteBucket(device, alignedStart + minute, terminal, 3_600_000L),
             MinuteBucket(device, alignedStart + 2 * minute, slack, 1_800_000L),
         )
         val produced = RollupEngine.rollup(device, day, buckets)
+
+        assertEquals(3, produced.size, "every app with time must get a rollup")
+        assertEquals(
+            mapOf(safari to 2 * 3_600_000L, terminal to 3_600_000L, slack to 1_800_000L),
+            produced.associate { it.appKey to it.totalMs },
+        )
         assertEquals(
             3_600_000L * 3 + 1_800_000L,
-            RollupEngine.dayTotal(listOf(produced)),
+            RollupEngine.dayTotal(produced),
             "Safari 2h + Terminal 1h + Slack 30m must total 3h30m, not Safari's 2h",
         )
     }
 
     @Test
-    @Ignore("Blocked on #15 — an empty day fabricates a rollup row keyed on AppKey(\"\").")
-    fun `an empty day produces no rollup row`() {
-        val produced = RollupEngine.rollup(device, day, emptyList())
-        assertTrue(
-            produced.appKey.value.isNotEmpty(),
-            "an empty day must not fabricate a rollup keyed on a blank AppKey — that row " +
-                "would be persisted and joined against like a real app",
+    fun `an empty day produces no rollup rows`() {
+        // The old fallback fabricated AppDayRollup(device, day, AppKey(""), 0),
+        // which would have been persisted and joined against like a real app.
+        assertEquals(emptyList(), RollupEngine.rollup(device, day, emptyList()))
+    }
+
+    @Test
+    fun `every rollup carries the device and day it was asked for`() {
+        val buckets = listOf(
+            MinuteBucket(device, alignedStart, safari, minute),
+            MinuteBucket(device, alignedStart, terminal, minute),
+        )
+        RollupEngine.rollup(device, day, buckets).forEach {
+            assertEquals(device, it.deviceId)
+            assertEquals(day, it.dayUtc)
+        }
+    }
+
+    @Test
+    fun `rollup totals match the buckets they came from`() {
+        // The end-to-end invariant of the three-layer model: an event's
+        // duration survives bucketing and rolling up unchanged.
+        val events = listOf(
+            event(seq = 1, appKey = safari, startedAtMs = unalignedStart, durationMs = 7 * minute + 123),
+            event(seq = 2, appKey = terminal, startedAtMs = unalignedStart, durationMs = 90_000),
+            event(seq = 3, appKey = safari, startedAtMs = unalignedStart + 10 * minute, durationMs = minute),
+        )
+        val buckets = events.flatMap { RollupEngine.bucket(it) }
+        val rollups = RollupEngine.rollup(device, day, buckets)
+
+        assertEquals(
+            events.sumOf { it.durationMs },
+            RollupEngine.dayTotal(rollups),
+            "no time may be created or lost between event and rollup",
+        )
+        assertEquals(
+            8 * minute + 123,
+            rollups.single { it.appKey == safari }.totalMs,
+            "two Safari events on one day must sum into one rollup",
         )
     }
 }
