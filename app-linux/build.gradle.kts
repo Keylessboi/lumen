@@ -51,3 +51,14 @@ compose.desktop {
         }
     }
 }
+
+// Live-test helper: prints the desktop runtime classpath so collector
+// tests (LiveTest.kt) can run directly without the Compose window.
+tasks.register("printClasspath") {
+    doLast {
+        val cp = configurations.getByName("desktopRuntimeClasspath").asPath
+        println("CLASSPATH_START")
+        println(cp)
+        println("CLASSPATH_END")
+    }
+}
