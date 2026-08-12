@@ -8,6 +8,7 @@ compose-multiplatform = "1.8.2"
 androidx-activity = "1.10.1"
 androidx-lifecycle = "2.9.0"
 sqldelight = "2.0.2"
+sqlite-jdbc = "3.45.2.0"
 kotlinx-coroutines = "1.10.1"
 kotlinx-serialization = "1.8.0"
 kotlinx-datetime = "0.6.2"
@@ -22,6 +23,9 @@ kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-jvm-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+# Raw JDBC access for app-macos's read-only import of the macOS Knowledge
+# store (knowledgeC.db). Not for app data — that goes through SQLDelight.
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 libsodium-jni = { module = "org.abstractj.kalium:kalium", version.ref = "libsodium" }
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
