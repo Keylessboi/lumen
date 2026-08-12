@@ -29,7 +29,9 @@ import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.charts.CategorySlice
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Lumen for Android.
@@ -92,12 +94,17 @@ class MainActivity : ComponentActivity() {
             // is exactly the app list grouped, so they cannot disagree.
             val dayView = remember { DayView(sessionCategoryEngine()) }
 
-            fun render() {
+            // All DB reads happen on Dispatchers.IO, with state writes applied
+            // back on the main thread. The old version ran the 7-day trend
+            // query on the main thread, which blocked on the SQLite lock the
+            // IO backfill holds — that is the ANR ("Input dispatching timed
+            // out") that reappeared even after the backfill was batched.
+            suspend fun render() = withContext(Dispatchers.IO) {
                 val today = UtcDay.today()
                 val rollups = store.rollupsForDay(deviceId, today)
                 // storedTotalMs must exclude the idle key: locked screen time
                 // is not screen time, and the UI total feeds off this.
-                storedTotalMs = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
+                val storedTotal = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
                 val list = rollups
                     .filter { it.appKey.value.isNotBlank() }
                     .sortedByDescending { it.totalMs }
@@ -108,10 +115,6 @@ class MainActivity : ComponentActivity() {
                             totalMs = rollup.totalMs,
                         )
                     }
-                storedTotals = list
-                totals = dayView.rows(list)
-                categories = dayView.categoryNames(list)
-                    .map { (name, ms) -> CategorySlice(name, ms) }
 
                 // Recent days for the trend chart, in the same UTC-day
                 // arithmetic macOS and Linux use — a local-zone daysBetween
@@ -128,8 +131,19 @@ class MainActivity : ComponentActivity() {
                         .sumOf { it.activeMs }
                     DayTotal(dayUtc = dayUtc, totalMs = dayMs, isToday = dayUtc == today)
                 }
-                recentDays = dayTotals
-                val completed = dayTotals.filter { !it.isToday && it.totalMs > 0 }
+                RenderSnapshot(
+                    storedTotal = storedTotal,
+                    list = list,
+                    dayTotals = dayTotals,
+                )
+            }.also { snap ->
+                storedTotalMs = snap.storedTotal
+                storedTotals = snap.list
+                totals = dayView.rows(snap.list)
+                categories = dayView.categoryNames(snap.list)
+                    .map { (name, ms) -> CategorySlice(name, ms) }
+                recentDays = snap.dayTotals
+                val completed = snap.dayTotals.filter { !it.isToday && it.totalMs > 0 }
                 averageMs = if (completed.isNotEmpty()) completed.sumOf { it.totalMs } / completed.size else null
             }
 
@@ -156,13 +170,35 @@ class MainActivity : ComponentActivity() {
                     }
             }
 
+            /** Recompute one day's rollups from its buckets (idempotent). */
+            fun recomputeDayRollups(deviceId: DeviceId, atMs: Long) {
+                val today = UtcDay.dayOf(atMs)
+                val dayStart = UtcDay.boundary(today)
+                val buckets = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                RollupEngine.rollup(deviceId, today, buckets).forEach(store::upsertRollup)
+            }
+
+            /** Recompute the trend window's rollups once after a batched import. */
+            fun recomputeHistoryRollups() {
+                val today = UtcDay.today()
+                (0 until HISTORY_WINDOW_DAYS).forEach { back ->
+                    val dayUtc = UtcDay.dayOf(UtcDay.boundary(today) - back * MILLIS_PER_DAY)
+                    val dayStart = UtcDay.boundary(dayUtc)
+                    val buckets = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                    RollupEngine.rollup(deviceId, dayUtc, buckets).forEach(store::upsertRollup)
+                }
+            }
+
             fun persistEvent(event: FocusEvent) {
                 store.insertEvent(event)
                 RollupEngine.bucket(event).forEach(store::insertBucket)
-                val today = UtcDay.dayOf(event.startedAtMs)
-                val dayStart = UtcDay.boundary(today)
-                val buckets = store.bucketsForRange(event.deviceId, dayStart, dayStart + 86_400_000)
-                RollupEngine.rollup(event.deviceId, today, buckets).forEach(store::upsertRollup)
+                recomputeDayRollups(event.deviceId, event.startedAtMs)
+            }
+
+            /** Insert event + buckets only — cheap, used by the batched backfill. */
+            fun insertEventOnly(event: FocusEvent) {
+                store.insertEvent(event)
+                RollupEngine.bucket(event).forEach(store::insertBucket)
             }
 
             LaunchedEffect(permission) {
@@ -183,16 +219,28 @@ class MainActivity : ComponentActivity() {
                 // the real day. Backfill the FULL horizon, not just today:
                 // the trend chart reads past days, and a today-only query
                 // leaves them at zero on a fresh install.
+                //
+                // The backfill can be hundreds of events. It runs on
+                // Dispatchers.IO (never the main thread — that ANRs first
+                // launch), and inserts are batched: events + buckets only
+                // during the loop, rollups recomputed ONCE afterward. The
+                // old per-event full-day rollup recompute made the import
+                // O(n²) — each event re-read every bucket of its day while
+                // holding the SQLite write lock, so the main thread blocked
+                // on the post-import render for minutes.
                 val sinceMs = System.currentTimeMillis() - BACKFILL_DAYS * 86_400_000
-                collector.backfill(sinceMs).forEach { change ->
-                    day.remember(change)
-                    tracker.onChange(change)?.let { closed ->
-                        persistEvent(closed)
-                        day.add(closed)
+                withContext(Dispatchers.IO) {
+                    collector.backfill(sinceMs).forEach { change ->
+                        day.remember(change)
+                        tracker.onChange(change)?.let { closed ->
+                            insertEventOnly(closed)
+                            day.add(closed)
+                        }
+                        liveAppKey = change.appKey
+                        liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
+                        liveSinceMs = change.atMs
                     }
-                    liveAppKey = change.appKey
-                    liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
-                    liveSinceMs = change.atMs
+                    recomputeHistoryRollups()
                 }
                 render()
                 refreshTotals(0)
@@ -200,8 +248,10 @@ class MainActivity : ComponentActivity() {
                 collector.focusChanges().collect { change ->
                     day.remember(change)
                     tracker.onChange(change)?.let { closed ->
-                        persistEvent(closed)
-                        day.add(closed)
+                        withContext(Dispatchers.IO) {
+                            persistEvent(closed)
+                            day.add(closed)
+                        }
                         render()
                         refreshTotals(0)
                     }
@@ -308,3 +358,10 @@ class MainActivity : ComponentActivity() {
         private const val BACKFILL_DAYS = 3
     }
 }
+
+/** Values computed off the main thread by [MainActivity]'s render, applied on it. */
+private data class RenderSnapshot(
+    val storedTotal: Long,
+    val list: List<AppTotal>,
+    val dayTotals: List<DayTotal>,
+)
