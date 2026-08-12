@@ -41,6 +41,24 @@ android {
     namespace = "dev.lumen.app"
     compileSdk = 36
 
+    packaging {
+        resources {
+            // Bouncy Castle (Argon2id for the M5 export) ships multi-release
+            // JAR metadata that collides during APK packaging:
+            //   2 files found with path 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
+            // These are OSGi and signing artefacts with no meaning inside an
+            // APK. Excluded rather than pickFirst: a first-wins rule would
+            // silently keep an arbitrary one of two files, which is the wrong
+            // answer if a real resource ever collides here. Excluding says
+            // these specific paths do not belong in the package at all.
+            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/*.SF"
+            excludes += "/META-INF/*.DSA"
+            excludes += "/META-INF/*.RSA"
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.lumen.app"
         minSdk = 26
