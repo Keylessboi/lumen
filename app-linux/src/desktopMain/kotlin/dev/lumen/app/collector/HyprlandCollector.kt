@@ -49,13 +49,6 @@ class HyprlandCollector(
         detectsIdle = false,
     )
 
-    /**
-     * The app's own WM_CLASS — the dev harness window is
-     * `dev-lumen-app-MainKt`. Excluded from reported focus by the engine
-     * (docs/design-spec.md: the app must not count its own window).
-     */
-    override val selfAppKey: AppKey = AppKey("dev-lumen-app-mainkt")
-
     override fun permissionState(): PermissionState =
         if (socketPath.toFile().exists()) {
             PermissionState.Granted
