@@ -17,7 +17,7 @@ import dev.lumen.core.clock.UtcDay
 import dev.lumen.macos.collector.LsAppInfoCollector
 import dev.lumen.macos.importer.KnowledgeCImporter
 import dev.lumen.macos.permissions.FullDiskAccess
-import dev.lumen.macos.session.FocusSessionTracker
+import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.macos.startup.LoginItem
 import dev.lumen.macos.store.UsageStore
 import dev.lumen.macos.ui.LumenTrayIcon

@@ -1,4 +1,4 @@
-package dev.lumen.macos.session
+package dev.lumen.core.session
 
 import dev.lumen.core.collector.FocusChange
 import dev.lumen.core.model.AppKey
@@ -19,6 +19,12 @@ import dev.lumen.core.model.FocusEvent
  * live time without the store having to invent a duration that hasn't elapsed.
  *
  * Not thread-safe; drive it from a single collector coroutine.
+ *
+ * Lives in core because it is pure and every platform needs exactly it: the
+ * collector seam reports transitions precisely so duration is derived once,
+ * centrally, rather than three times in three collectors and wrong in three
+ * different ways. It started in app-macos only because macOS was the first
+ * platform to need it.
  */
 class FocusSessionTracker(
     private val deviceId: DeviceId,
