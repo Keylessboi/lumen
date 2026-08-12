@@ -1,6 +1,7 @@
 package dev.lumen.app.collector
 
 import dev.lumen.core.clock.UtcDay
+import dev.lumen.core.collector.excludingSelf
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.SyncState
@@ -24,10 +25,14 @@ fun main() = runBlocking {
 
     val collector = HyprlandCollector()
     println("collector permission: ${collector.permissionState()}")
+    println("self-exclusion appKey: ${collector.selfAppKey}")
 
     println("capturing up to 8 focus changes (15s window)...")
     val changes = withTimeout(15_000) {
-        collector.focusChanges().take(8).toList()
+        collector.focusChanges()
+            .excludingSelf(collector.selfAppKey)
+            .take(8)
+            .toList()
     }
     println("captured ${changes.size} changes")
 

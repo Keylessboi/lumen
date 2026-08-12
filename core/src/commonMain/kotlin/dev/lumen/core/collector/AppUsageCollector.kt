@@ -33,6 +33,19 @@ interface AppUsageCollector {
     val capabilities: CollectorCapabilities
 
     /**
+     * The AppKey that identifies lumen ITSELF on this platform
+     * (WM_CLASS/app_id on Linux, package name on Android, bundle id on macOS).
+     *
+     * MUST be excluded from reported focus. A screen-time app that counts its
+     * own window corrupts every number it shows — `docs/design-spec.md` locks
+     * this ("the app must exclude ITSELF from its own numbers from day one").
+     * The engine filters [selfAppKey] out of [focusChanges] centrally, so a
+     * collector only declares it and never has to special-case its own
+     * identity in event logic.
+     */
+    val selfAppKey: AppKey
+
+    /**
      * Hot stream of focus transitions.
      *
      * Push-based platforms (Hyprland, macOS NSWorkspace) emit as events
