@@ -40,16 +40,7 @@ import java.io.File
  * derives durations; [RollupEngine] buckets and rolls them up; the store
  * survives restarts.
  */
-fun main(args: Array<String>) {
-    // `lumen --headless` runs the tracking pipeline with no window — the
-    // systemd service mode. The window app shares the same store, so both
-    // can run at once and agree on the day.
-    if (args.contains("--headless")) {
-        mainHeadless()
-        return
-    }
-    runApp()
-}
+fun main(args: Array<String>) = runApp()
 
 private fun runApp() = application {
     Window(
@@ -176,8 +167,23 @@ private fun runApp() = application {
         }
 
         LaunchedEffect(Unit) {
+            var lastDay = UtcDay.today()
             while (true) {
                 now = System.currentTimeMillis()
+                val today = UtcDay.today()
+                // UTC midnight rollover: the cached render (and its stored
+                // rollup totals) belong to yesterday. Without this the UI
+                // keeps showing yesterday's day until the next focus change,
+                // which for an app left open overnight is all morning.
+                if (today != lastDay) {
+                    lastDay = today
+                    day.clear()
+                    render()
+                    loadHistory()
+                    liveSinceMs = 0L
+                    liveAppKey = null
+                    liveApp = null
+                }
                 val liveMs = if (liveSinceMs > 0 && liveAppKey != null && liveAppKey!!.value.isNotBlank())
                     (now - liveSinceMs).coerceAtLeast(0) else 0
                 refreshTotals(liveMs)
