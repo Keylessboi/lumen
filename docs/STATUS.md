@@ -1,52 +1,36 @@
 # Lumen — Repo Status
 
-**Updated:** 2026-08-12 (M1 in progress)
+**Updated:** 2026-08-12 (M1 tagged — contract freeze)
 
 ## Build state
 
-**`./gradlew :core:build` GREEN on Arch + macOS.** Desktop, Android, and
-macOS targets all compile.
+**`./gradlew :core:build` GREEN on Arch + macOS, all four targets compile.**
 
 | Module | State | Owner | Notes |
 |---|---|---|---|
 | `:core` | green | A | AGP 8.9.2 + Gradle 9.1.0 + compileSdk 36; `android.useAndroidX=true` |
-| `:core` schema | frozen-at-M1 | A | `LumenDatabase.sq` matches `docs/data-model.md`; generates clean; storage queries added pre-freeze |
-| `:core` desktopMain | driver done | A | `JvmLumenStore` binds seam to SQLDelight (file + in-memory); 7 green round-trip tests |
-| `:core` androidMain | empty | A | Keystore impl at M4/E2EE (X25519, hardware-wrapped at rest per docs/e2ee.md §5.2) |
-| `:core` commonTest | **yours (B)** | B | Contract tests — the other half of the M1 gate |
+| `:core` schema | **frozen at M1** | A | `LumenDatabase.sq` matches `docs/data-model.md`; compound PK on events; 98 green tests |
+| `:core` desktopMain | driver done | A | `JvmLumenStore` + `JvmLumenStoreContractTest` (B's abstract kit) |
+| `:core` androidMain | empty | A | Keystore impl at M4/E2EE |
+| `:core` commonTest | **done (B)** | B | PR #17: 64 tests — RollupEngine, UtcDay, value semantics, serialization, EncryptedPayload, LumenStoreContract |
 | `:transport-xmpp` | WIP | A | No client code yet; sync at M4 |
-| `:app-linux` | collector verified | A | HyprlandCollector capturing live events on real session (M2 core done); dev harness window runs |
-| `:app-android` | WIP | A | No manifest/Activity yet; CMP Android app at M3 |
-| `:app-macos` | vertical slice | B | Lumen runs on macOS (PR #13): lsappinfo collector + KnowledgeCImporter (Apple Screen Time DB) + NDJSON store + Today screen |
-
-Environment: Java 17, Gradle 9.1.0 wrapper, AGP 8.9.2, Kotlin 2.2.10,
-SDK 36 at `/home/travis/Android/Sdk` (`local.properties`).
+| `:app-linux` | collector verified | A | HyprlandCollector live-tested; full-path integration test green |
+| `:app-android` | M3 scaffold | A | UsageStatsCollector + MainActivity + manifest; emulator live-tested |
+| `:app-macos` | vertical slice | B | PR #13: local-only slice — lsappinfo + KnowledgeCImporter + Today screen |
 
 ## M0 — DONE
 
-- Tagged `M0`, green on both machines.
-- Machine split (A = Arch/Android, B = macOS/iOS), ownership zones, branch
-  prefixes `a/`/`b/`, CI ownership workflow (fails closed).
-- E2EE freeze-review accepted: at-rest guarantee, wrappedKeys, padding.
-- Wake protocol: mailbox-only, pointer-only, `agent-inbox` branch. Watcher
-  fixed to read branch ref directly (found the merge bug by running it).
+## M1 — DONE (tagged)
 
-## M1 — IN PROGRESS
+- **Contract freeze**: schema, core public API, reconciliation contract, serialization format, collector seam, E2EE seam.
+- **98 green tests** (0 failures, 2 skipped in RollupEngine per B's PR description).
+- **B's contract suite caught a real schema bug** (seq PK was global, not per-device — fixed to compound PK).
+- **Gate**: schema generates + LumenStore compiles + B's contract tests pass on both machines.
 
-**My side (A, on main `ebf98e7`):** schema + storage queries, `LumenStore`
-seam, `JvmLumenStore` driver, 7 green round-trip tests.
+## M2 (G1 Linux slice) — next
 
-**Your side (B):** `core/src/commonTest` contract tests — written by the
-consumer of the frozen API, per the #12 re-cut. This is what makes the
-freeze real (my own round-trips test what I meant, not what I said).
-
-**Gate:** schema generates + LumenStore compiles + B's contract tests pass
-on both machines → tag `M1`.
+- Hyprland collector verified live — remaining: Sway + X11 collectors, CMP read UI.
 
 ## Post-v1 directions
 
-`docs/directions.md` — distilled from the adversarial run. Killed: iOS
-tracking, family metrics, app-blocking, cloud dashboard, Windows/TUI/
-self-host-server. Ship first: weekly reflection (Screen Weather), sponsorware
-relay tier, CLI + daemon, absorption sessions, browser extension, dev
-integrations.
+`docs/directions.md` — distilled from the adversarial run.
