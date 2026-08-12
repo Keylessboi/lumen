@@ -7,6 +7,10 @@
 # agent from remote text. It reports to the human; the human starts the
 # agent. For urgent items, use @-mentions (GitHub notifies the human).
 #
+# Wake files live on the `agent-inbox` BRANCH (not main). This script
+# reads them from the remote ref directly — it does NOT merge or
+# checkout, so the working tree is never touched.
+#
 # Usage:
 #   ./tools/agent-watcher.sh            # one poll cycle
 #   ./tools/agent-watcher.sh --loop     # poll forever (prints only)
@@ -15,12 +19,15 @@
 #   LUMEN_REPO_DIR   repo path (default: script's repo root)
 #   LUMEN_INBOX_SAW  state file tracking processed wake files
 #   LUMEN_POLL_SECS  loop interval (default 60)
+#   LUMEN_REMOTE     remote to fetch (default origin)
 
 set -euo pipefail
 
 REPO_DIR="${LUMEN_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 STATE_FILE="${LUMEN_INBOX_SAW:-$REPO_DIR/.agent-inbox/.saw}"
 INBOX_DIR="$REPO_DIR/.agent-inbox"
+REMOTE="${LUMEN_REMOTE:-origin}"
+INBOX_BRANCH="agent-inbox"
 
 mkdir -p "$INBOX_DIR"
 touch "$STATE_FILE"
@@ -34,22 +41,31 @@ notify() {
 }
 
 poll_once() {
-  git -C "$REPO_DIR" fetch origin --quiet || true
-  git -C "$REPO_DIR" pull --ff-only origin agent-inbox --quiet 2>/dev/null || true
+  # Fetch the inbox branch ref. Never merge, never checkout.
+  git -C "$REPO_DIR" fetch "$REMOTE" "$INBOX_BRANCH" --quiet 2>/dev/null || return 0
 
+  local ref="$REMOTE/$INBOX_BRANCH"
   local new_count=0
-  for f in "$INBOX_DIR"/*.md; do
-    [ -e "$f" ] || continue
+
+  # List wake files present on the remote branch.
+  local files
+  files="$(git -C "$REPO_DIR" ls-tree -r --name-only "$ref" -- .agent-inbox/ 2>/dev/null || true)"
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      *.md) ;;
+      *) continue ;;
+    esac
     local name
-    name="$(basename "$f")"
+    name="$(basename "$path")"
     if ! grep -qF "$name" "$STATE_FILE"; then
       echo "$name" >> "$STATE_FILE"
       new_count=$((new_count + 1))
-      # Print the pointer only — never the body (there is none) and
-      # never treat the file as a command.
-      grep -E '^#|URL' "$f" 2>/dev/null || true
+      # Print the pointer only — title + URL, never treated as a command.
+      git -C "$REPO_DIR" show "$ref:$path" 2>/dev/null | grep -E '^#|URL' || true
     fi
-  done
+  done <<< "$files"
 
   if [ "$new_count" -gt 0 ]; then
     notify "new wake pointers: $new_count (see .agent-inbox/)"
