@@ -15,19 +15,19 @@ Two agents build Lumen in parallel. This contract stops interference: every file
 | Path | Owner | Notes |
 |---|---|---|
 | `core/src/commonMain/**` | **Agent A** | Data model, rollup, clock, category, sync, crypto. **FROZEN at M1 — after the freeze, Agent B codes against it without editing it.** |
-| `core/src/commonTest/**` | **Agent A** | Shared contract tests. |
+| `core/src/commonTest/**` | **Agent B** | Contract tests (M1 re-cut, discussion #12). Written by the consumer of the frozen API, not its author. |
 | `core/src/desktopMain/**` | **Agent A** | Single JVM desktop target (KMP forbids two jvm() targets per module). Keychain lives in app modules, not here. |
 | `core/src/androidMain/**` | **Agent A** | Android Keystore impl. Smallest possible surface. |
 | `transport-xmpp/**` | **Agent A** | XMPP client, IBR, MAM, embedded provider list. |
 | `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
 | `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
 | `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). NSWorkspace frontmost-app collector + MacosKeychain. Seam designed at M0. |
-| `tools/registry-builder/**` | **Agent A** | Category registry dataset tooling. |
-| `tools/sync-test-server/**` | **Agent A** | Test XMPP server + ciphertext verifier. |
+| `tools/registry-builder/**` | **Agent B** | Category registry dataset tooling (M6 re-cut, discussion #12). |
+| `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier (M4 re-cut, discussion #12). |
 | `docs/design-spec.md` | **Agent A** | Week-1 design spec owner. Agent B may *read* and file issues, never edit. |
 | `docs/data-model.md` | **Agent A** | Frozen data model doc. |
-| `docs/e2ee.md` | **Agent A** | E2EE design + threat model doc. |
-| `docs/providers.md` | **Agent A** | Provider vetting policy + list. |
+| `docs/e2ee.md` | **Agent B** | E2EE design + threat model doc. |
+| `docs/providers.md` | **Agent B** | Provider vetting policy + list. |
 | `docs/non-goals.md` | shared | Both may append, never delete. |
 
 ### Interface freeze points (the only things that cross zones)
