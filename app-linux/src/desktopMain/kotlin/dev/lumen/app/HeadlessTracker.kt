@@ -88,6 +88,10 @@ private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
             deviceId = id,
         ),
     )
+    // A fresh device has nothing acked — the watermark must be -1, not the
+    // store's 0 default, or the first event (seq 0) is excluded from the
+    // outbox by `eventsAfter(seq > watermark)` and never syncs.
+    store.setAckedSeq(id, -1)
     return id
 }
 

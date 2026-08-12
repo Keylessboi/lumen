@@ -216,7 +216,7 @@ class SyncEngineTest {
         override fun manualCategory(appKey: AppKey): String? = null
         override fun setManualOverride(appKey: AppKey, category: String) {}
 
-        override fun lastAckedSeq(deviceId: DeviceId): Long = watermarks[deviceId.value] ?: 0L
+        override fun lastAckedSeq(deviceId: DeviceId): Long = watermarks[deviceId.value] ?: -1L
         override fun setAckedSeq(deviceId: DeviceId, seq: Long) { watermarks[deviceId.value] = seq }
 
         override fun controlState(controlKey: String): dev.lumen.core.model.ControlState? = null
