@@ -1,9 +1,15 @@
 # app-macos
 
 **Owner:** Agent B (`docs/plan.md`, machine split at M0)
-**Status:** Post-MVP #2. Not in any v1 gate. This module exists now so the collector seam is designed against three real platforms rather than two, per the accepted decision to design the seams before the module is promoted.
+**Status:** Runs. Local-only vertical slice: collector → session tracker → local store → Today screen.
 
-Currently the collector and its seam only — no Compose UI. The UI is a straight reuse of `app-linux`'s Compose screens when macOS is promoted, and pulling the Compose plugins in early would only add build weight and a second place for CMP desktop version drift to bite.
+```bash
+./gradlew :app-macos:run
+```
+
+No account, no sync, no network, no permission prompts. `docs/plan.md` locks local-only as the default posture — *"sync additive, never a dependency"*, *"unconfigured transport valid"* — so a local-only build is a complete slice rather than a stub, and it satisfies the v1 criterion *"Local-first: sync never blocks"* on its own.
+
+**Note on the dev-mode self-reading.** Launched via `./gradlew :app-macos:run` the app sees itself as `net.java.openjdk.java` / "MainKt", because a bare JVM process has no bundle identity. Packaged (`./gradlew :app-macos:packageDmg`) it appears correctly as `dev.lumen.macos` / "Lumen". Lumen deliberately does **not** filter itself out of its own totals — time spent reading your screen-time app is still screen time, and hiding it would be exactly the kind of flattering lie the design spec rules out.
 
 ---
 
@@ -51,27 +57,47 @@ Design note, since it is the load-bearing decision: collectors report **transiti
 
 ---
 
+## Storage
+
+Events are appended as NDJSON, one file per UTC day, under `~/Library/Application Support/Lumen/`. Per-app day totals are **derived on read** via `RollupEngine.bucket()` rather than stored — `RollupEngine`'s own contract says buckets and rollups are derived, never authoritative.
+
+Deliberately not SQLite: the SQLite schema lives in `core` and freezes at M1 (Agent A's zone). Duplicating it here would create a second, divergent definition of the same tables. NDJSON is a local cache this module owns outright and can discard when `core`'s store lands.
+
+Bucket-to-day assignment goes through `UtcDay.dayOf()` on each *bucket's* timestamp, not the event's start, so a session spanning UTC midnight splits across both days. That is the locked UTC-day rule applied where it actually bites, and it has a test.
+
+## UI
+
+`docs/design-spec.md` is binding and every value in `ui/Theme.kt` is transcribed from it, not chosen — `#0E1116` ink-near-black (never pure black), the single indigo `#7C9CF5` accent, the Okabe-Ito colourblind-safe category palette with red reserved for destructive actions only, tabular figures (`tnum`) on every time readout so live numbers don't jitter, and 200 ms ease-out with `prefers-reduced-motion` honoured via `com.apple.universalaccess reduceMotion`.
+
+The Today screen states the number and never evaluates it. No streaks, no badges, no colour-coded verdict. A mirror, not a judge.
+
 ## Verification
 
 ```
 $ ./gradlew :app-macos:desktopTest
-BUILD SUCCESSFUL
-12 tests, 0 failures
+BUILD SUCCESSFUL — 27 tests, 0 failures
 ```
 
-End-to-end against the live system on macOS 15 / arm64:
+End-to-end on macOS 15 / arm64, running the real app against the live system:
 
 ```
-available=true
-frontmost=FrontmostApp(appKey=AppKey(value=com.anthropic.claudefordesktop), displayName=Claude)
+$ cat ~/Library/Application\ Support/Lumen/events-2026-08-12.ndjson
+{"seq":0,"deviceId":"0af18d53-...","appKey":"net.java.openjdk.java",
+ "startedAtMs":1786495295405,"durationMs":8246}
+
+$ cat ~/Library/Application\ Support/Lumen/app-names.tsv
+net.java.openjdk.java	MainKt
+com.anthropic.claudefordesktop	Claude
 ```
 
-No permission dialog appeared at any point, confirming the TCC analysis above.
+Real focus transitions, real durations, resolved names, persisted across restart. No permission dialog appeared at any point, confirming the TCC analysis above.
 
 ---
 
 ## Not done here
 
-- `core/src/desktopMacosMain` Keychain (macOS Keychain Services) — blocked on the `Keychain` contract question in `docs/e2ee.md` §8, which needs resolving before M1 regardless of platform.
-- The `NSWorkspace` bridge and IOKit idle detection.
-- Compose UI — deferred until macOS is promoted out of post-MVP.
+- **Categories** — every app currently shows individually; the category registry is M6 and is not in this module.
+- `core/src/desktopMacosMain` Keychain — needed only for sync, and gated on the `Keychain` contract question in `docs/e2ee.md` §8.
+- The `NSWorkspace` bridge and IOKit idle detection (see the mechanism table above).
+- Day curve and 7/30-day charts — the spec allows exactly three chart types; only the Today bars exist so far.
+- Sync. Local-only is the point, not a limitation.

@@ -1,5 +1,9 @@
 package dev.lumen.macos.collector
 
+import dev.lumen.core.collector.AppUsageCollector
+import dev.lumen.core.collector.CollectorCapabilities
+import dev.lumen.core.collector.FocusChange
+import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.AppKey
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
