@@ -19,9 +19,10 @@ Two agents build Lumen in parallel. This contract stops interference: every file
 | `core/src/desktopMain/**` | **Agent A** | Single JVM desktop target (KMP forbids two jvm() targets per module). Keychain lives in app modules, not here. |
 | `core/src/androidMain/**` | **Agent A** | Android Keystore impl. Smallest possible surface. |
 | `transport-xmpp/**` | **Agent A** | XMPP client, IBR, MAM, embedded provider list. |
-| `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), UI, charts, LinuxKeychain. |
-| `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. |
-| `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). NSWorkspace frontmost-app collector + MacosKeychain. Seam designed at M0. |
+| `ui/**` | **shared** | Compose Multiplatform UI — design tokens, screens, charts. Renders `docs/design-spec.md` for every platform (discussion #21). Either agent may edit, the other reviews in the PR body. Token changes remain Agent A's call as spec owner. |
+| `app-linux/**` | **Agent A** | CMP desktop app, collectors (hyprland/sway/x11), LinuxKeychain. **UI lives in `:ui`.** |
+| `app-android/**` | **Agent A** | CMP Android app, UsageStats collector, hardening. **UI lives in `:ui`.** |
+| `app-macos/**` | **Agent B** | CMP macOS app (post-MVP #2). lsappinfo collector, Screen Time importer, MacosKeychain, tray/packaging. **UI lives in `:ui`.** |
 | `tools/registry-builder/**` | **Agent B** | Category registry dataset tooling (M6 re-cut, discussion #12). |
 | `tools/sync-test-server/**` | **Agent B** | Test XMPP server + ciphertext verifier (M4 re-cut, discussion #12). |
 | `docs/design-spec.md` | **Agent A** | Week-1 design spec owner. Agent B may *read* and file issues, never edit. |
@@ -148,8 +149,10 @@ lumen/
 ├── docs/  design-spec.md · data-model.md · e2ee.md · providers.md · non-goals.md
 ├── core/  Kotlin commonMain: model/ store/ rollup/ clock/ category/ sync/ (SyncTransport.kt, SyncEngine.kt, envelope.kt) crypto/ (E2EE.kt, keychain.kt) + androidMain keystore + desktopMain libsecret + commonTest
 ├── transport-xmpp/  JVM module (android+desktop): IBR (XEP-0077), providers/ static list, mam/
-├── app-linux/  CMP desktop: collector/{hyprland,sway,x11}/ ui/ charts/
-├── app-android/  CMP android: collector/usagestats/ ui/ hardening/
+├── ui/  shared Compose Multiplatform: Theme.kt (executable design-spec) · TodayScreen.kt · charts/
+├── app-linux/  CMP desktop: collector/{hyprland,sway,x11}/ · window host · LinuxKeychain
+├── app-android/  CMP android: collector/usagestats/ · Activity host · hardening/
+├── app-macos/  CMP desktop: collector/ · importer/ · store/ · tray + packaging
 └── tools/  registry-builder/ · sync-test-server/
 ```
 
