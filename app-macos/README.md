@@ -57,6 +57,25 @@ Design note, since it is the load-bearing decision: collectors report **transiti
 
 ---
 
+## History import (opt-in, off by default)
+
+Live tracking starts blank: it only knows what happened after Lumen launched. macOS itself keeps a record of app focus going back weeks, in `~/Library/Application Support/Knowledge/knowledgeC.db` — the system store behind Screen Time. Lumen can import it once to fill in the past.
+
+This is the macOS counterpart to Android's `UsageStatsManager`, and it is what makes `AppUsageCollector.canBackfill` true here.
+
+**It costs Full Disk Access, and that is a genuinely large ask.** An app holding FDA can read Mail, Messages, Safari history and every other user file. Lumen reads only rows whose `ZSTREAMNAME` is `/app/inFocus` and ignores everything else in the store — but the *grant* is not that narrow, and the UI says so rather than glossing it. Hence: opt-in, off by default, dismissable, and tracking works completely without it.
+
+**There is no API to request Full Disk Access.** Screen Recording and Accessibility have request calls that raise a system prompt; FDA does not. The only supported pattern is detect → explain → deep-link to System Settings → re-check. `FullDiskAccess.openSettingsPane()` opens `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`; the user adds the app by hand.
+
+**The grant only applies to a relaunched process.** TCC decisions are cached per process, so an app granted FDA while running keeps seeing denials until it restarts. The banner says this explicitly — it is the step most implementations skip and the most common reason "I granted it and it still doesn't work".
+
+Safety rules the importer follows:
+
+- **Never opens the live database.** `knowledgeC.db` is a running system store in WAL mode; it is copied — with its `-wal`/`-shm` sidecars, or the copy silently omits the most recent writes — and the copy is read.
+- **Read-only** (`open_mode=1`). A test asserts the source file is byte-identical afterwards.
+- **Verifies the schema before trusting it.** The store is private and undocumented and Apple changes it between releases, so an unrecognised shape yields an explicit `SchemaUnrecognised` result. Importing nothing silently would look identical to "you used no apps".
+- **Idempotent** via an import watermark, so a second import cannot double your history.
+
 ## Storage
 
 Events are appended as NDJSON, one file per UTC day, under `~/Library/Application Support/Lumen/`. Per-app day totals are **derived on read** via `RollupEngine.bucket()` rather than stored — `RollupEngine`'s own contract says buckets and rollups are derived, never authoritative.
@@ -75,7 +94,7 @@ The Today screen states the number and never evaluates it. No streaks, no badges
 
 ```
 $ ./gradlew :app-macos:desktopTest
-BUILD SUCCESSFUL — 27 tests, 0 failures
+BUILD SUCCESSFUL — 35 tests, 0 failures
 ```
 
 End-to-end on macOS 15 / arm64, running the real app against the live system:

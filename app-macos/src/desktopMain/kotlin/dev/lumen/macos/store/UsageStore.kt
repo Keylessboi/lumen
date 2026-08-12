@@ -46,6 +46,29 @@ class UsageStore(
         return DeviceId(id)
     }
 
+    /**
+     * Newest event timestamp already imported from the Knowledge store, or 0
+     * if history has never been imported.
+     *
+     * The import is idempotent through this watermark: re-running it only
+     * pulls events newer than the last one taken. Without it, a second import
+     * would double every app's history.
+     */
+    fun importWatermark(): Long =
+        File(root, "import-watermark").takeIf { it.exists() }
+            ?.readText()?.trim()?.toLongOrNull() ?: 0L
+
+    fun setImportWatermark(atMs: Long) {
+        File(root, "import-watermark").writeText(atMs.toString())
+    }
+
+    /** Append a batch, advancing the import watermark to the newest event taken. */
+    fun appendImported(events: List<FocusEvent>) {
+        if (events.isEmpty()) return
+        events.forEach(::append)
+        setImportWatermark(events.maxOf { it.startedAtMs + it.durationMs })
+    }
+
     /** Append a closed session. */
     fun append(event: FocusEvent) {
         // An event can span midnight; it is written to the file for the day it

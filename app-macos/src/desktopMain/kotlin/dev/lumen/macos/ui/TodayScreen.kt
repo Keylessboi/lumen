@@ -45,6 +45,10 @@ fun TodayScreen(
     totalMs: Long,
     liveApp: String?,
     reducedMotion: Boolean,
+    historyState: HistoryState = HistoryState.Hidden,
+    onOpenSettings: () -> Unit = {},
+    onImport: () -> Unit = {},
+    onDismissHistory: () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -84,7 +88,16 @@ fun TodayScreen(
             style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 13.sp),
         )
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(20.dp))
+
+        HistoryBanner(
+            state = historyState,
+            onOpenSettings = onOpenSettings,
+            onImport = onImport,
+            onDismiss = onDismissHistory,
+        )
+
+        if (historyState != HistoryState.Hidden) Spacer(Modifier.height(20.dp))
 
         if (totals.isEmpty()) {
             Text(

@@ -31,6 +31,9 @@ kotlin {
                 implementation(compose.foundation)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
+                // Read-only JDBC access to the macOS Knowledge store for the
+                // opt-in history import. App data does not go through this.
+                implementation(libs.sqlite.jdbc)
             }
         }
         val desktopTest by getting {
