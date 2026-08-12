@@ -121,7 +121,7 @@ internal class LsAppInfoReader : FrontmostAppReader {
             ?: return null
         val name = exec(LSAPPINFO.path, "info", "-only", "name", asn)
             ?.let { parseQuoted(it, "LSDisplayName") }
-        return FrontmostApp(AppKey(bundleId), name)
+        return FrontmostApp(appKeyFor(bundleId, name), name)
     }
 
     private fun exec(vararg cmd: String): String? = try {
@@ -147,6 +147,54 @@ internal class LsAppInfoReader : FrontmostAppReader {
 
     internal companion object {
         val LSAPPINFO = java.io.File("/usr/bin/lsappinfo")
+
+        /**
+         * Bundle ids that identify a *runtime* rather than an application.
+         *
+         * An unpackaged JVM app reports the JDK's own bundle id, so every
+         * Java tool on the machine looks like the same app: they collapse
+         * into one row, labelled with whichever main class was seen first.
+         * On a developer's Mac — the buyer `docs/plan.md` names — that is a
+         * confidently wrong number, which `docs/design-spec.md` rules out
+         * ("Charts that lie = uninstall").
+         *
+         * The executable path does not help: it is the same `bin/java` for
+         * every one of them. `LSDisplayName` (the main class) is the only
+         * signal lsappinfo exposes that differs, so it becomes part of the
+         * key. Verified against a live process:
+         *
+         * ```
+         * "MainKt" ASN:0x0-0x8d18d1:
+         *     bundleID="net.java.openjdk.java"
+         *     executable path=".../openjdk@17/.../bin/java"
+         * ```
+         */
+        val RUNTIME_BUNDLE_IDS = setOf(
+            "net.java.openjdk.java",
+            "com.oracle.java.JavaAppletPlugin",
+            "com.apple.JavaApplicationStub",
+        )
+
+        /**
+         * Key an observation, disambiguating shared-runtime bundle ids.
+         *
+         * A packaged app keys on its bundle id, unchanged — that is the
+         * common path and it must stay byte-identical, because the AppKey is
+         * what every stored row joins on. Only a runtime id gets the
+         * `<runtime>/<name>` suffix, and `/` is used because a bundle id
+         * cannot contain one, so the composite can never collide with a real
+         * app's id.
+         *
+         * With no name to disambiguate by, the runtime id is returned as-is:
+         * one lumpy row is bad, but inventing a distinction we cannot observe
+         * is worse.
+         */
+        fun appKeyFor(bundleId: String, displayName: String?): AppKey =
+            if (bundleId in RUNTIME_BUNDLE_IDS && !displayName.isNullOrBlank()) {
+                AppKey("$bundleId/$displayName")
+            } else {
+                AppKey(bundleId)
+            }
         const val EXEC_TIMEOUT_SECONDS = 2L
 
         /**
