@@ -97,6 +97,11 @@ class AndroidLumenStore private constructor(
                 )
             }
 
+    override fun clearDerived(deviceId: DeviceId) {
+        queries.clearBucketsForDevice(deviceId.value)
+        queries.clearRollupsForDevice(deviceId.value)
+    }
+
     override fun upsertRollup(rollup: AppDayRollup) {
         queries.upsertRollup(
             device_id = rollup.deviceId.value,

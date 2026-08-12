@@ -37,6 +37,14 @@ interface LumenStore {
     /** Buckets for a UTC day window: [dayStartMs, dayEndMs). */
     fun bucketsForRange(deviceId: DeviceId, dayStartMs: Long, dayEndMs: Long): List<MinuteBucket>
 
+    /**
+     * Wipe this device's derived rows (buckets + UTC rollups) so they can
+     * be re-derived from events. Events are the source of truth (M1
+     * contract: buckets/rollups are DERIVED, never synced); this repairs
+     * drift when a buggy writer left derived rows that no event explains.
+     */
+    fun clearDerived(deviceId: DeviceId)
+
     // ---- rollups (kept forever) ----
 
     fun upsertRollup(rollup: AppDayRollup)
