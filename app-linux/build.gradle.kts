@@ -36,7 +36,16 @@ compose.desktop {
     application {
         mainClass = "dev.lumen.app.MainKt"
         nativeDistributions {
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb, org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage)
+            // Compose Desktop validates target formats against the HOST os at
+            // configuration time, so an unguarded Linux-only list fails the whole
+            // build on a non-Linux machine — including :core and :app-android.
+            // An empty targetFormats() list is rejected, so skip the call entirely.
+            if (org.gradle.internal.os.OperatingSystem.current().isLinux) {
+                targetFormats(
+                    org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb,
+                    org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage,
+                )
+            }
             packageName = "lumen"
             packageVersion = "0.1.0"
         }

@@ -16,6 +16,18 @@ AGENT="${1:?usage: ownership-check.sh <A|B> <base> <head>}"
 BASE="${2:?usage: ownership-check.sh <A|B> <base> <head>}"
 HEAD="${3:?usage: ownership-check.sh <A|B> <base> <head>}"
 
+# Fail closed: an unverifiable base means the gate cannot run, so it must
+# not pass. A shallow clone without the base ref would otherwise yield an
+# empty diff and "pass" the check.
+if ! git rev-parse --verify "${BASE}" >/dev/null 2>&1; then
+  echo "ownership check cannot run: base ref '${BASE}' does not exist (shallow clone?)" >&2
+  exit 1
+fi
+if ! git rev-parse --verify "${HEAD}" >/dev/null 2>&1; then
+  echo "ownership check cannot run: head ref '${HEAD}' does not exist" >&2
+  exit 1
+fi
+
 # Ownership zones (paths are prefix-matched)
 # Machine split (M0): Agent A = Arch Linux + Android testing.
 # Agent B = macOS + iOS.
