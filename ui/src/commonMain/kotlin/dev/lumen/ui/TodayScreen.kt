@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import dev.lumen.ui.charts.DayBarsSection
+import dev.lumen.ui.charts.DayTotal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -45,6 +47,12 @@ fun TodayScreen(
     liveApp: String?,
     reducedMotion: Boolean,
     historyState: HistoryState = HistoryState.Hidden,
+    /**
+     * Recent per-day totals for the trend view (chart 3 of the three in
+     * `docs/design-spec.md`). Empty hides the section entirely — a platform
+     * that cannot yet supply history shows no empty frame.
+     */
+    recentDays: List<DayTotal> = emptyList(),
     onOpenSettings: () -> Unit = {},
     onImport: () -> Unit = {},
     onDismissHistory: () -> Unit = {},
@@ -105,7 +113,10 @@ fun TodayScreen(
             )
         } else {
             val max = totals.maxOf { it.totalMs }.coerceAtLeast(1L)
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
                 items(totals, key = { it.appKey.value }) { row ->
                     AppRow(
                         row = row,
@@ -115,6 +126,14 @@ fun TodayScreen(
                     )
                 }
             }
+        }
+
+        // Trend view last: today is what the screen is for, history is
+        // context underneath it. Absent when there is none to show, so a
+        // fresh install has no empty frame.
+        if (recentDays.isNotEmpty()) {
+            Spacer(Modifier.height(28.dp))
+            DayBarsSection(title = "RECENT DAYS", days = recentDays)
         }
     }
 }

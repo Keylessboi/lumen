@@ -3,6 +3,7 @@ package dev.lumen.macos.store
 import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.model.AppKey
 import dev.lumen.ui.AppTotal
+import dev.lumen.ui.charts.DayTotal
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.rollup.RollupEngine
@@ -153,6 +154,29 @@ class UsageStore(
             .sortedByDescending { it.totalMs }
     }
 
+    /**
+     * Per-day totals for the [days] UTC days ending today, oldest first.
+     *
+     * Every day in the window is returned, including ones with nothing
+     * recorded — a gap in the data must render as an empty day rather than
+     * silently shortening the chart, which would misrepresent the period.
+     */
+    fun dailyTotals(days: Int): List<DayTotal> {
+        val today = UtcDay.today()
+        val todayStart = UtcDay.boundary(today)
+        return (days - 1 downTo 0).map { back ->
+            val dayStart = todayStart - back * MILLIS_PER_DAY
+            val dayUtc = UtcDay.dayOf(dayStart)
+            val total = totalsFor(dayUtc).sumOf { it.totalMs }
+            DayTotal(
+                dayUtc = dayUtc,
+                label = dayUtc.takeLast(2),
+                totalMs = total,
+                isToday = dayUtc == today,
+            )
+        }
+    }
+
     private fun readEvents(dayUtc: String): List<FocusEvent> {
         val f = File(root, "events-$dayUtc.ndjson")
         if (!f.exists()) return emptyList()
@@ -167,6 +191,8 @@ class UsageStore(
         UtcDay.dayOf(UtcDay.boundary(dayUtc) - 1L)
 
     companion object {
+        private const val MILLIS_PER_DAY = 86_400_000L
+
         fun defaultRoot(): File = File(
             System.getProperty("user.home"),
             "Library/Application Support/Lumen",
