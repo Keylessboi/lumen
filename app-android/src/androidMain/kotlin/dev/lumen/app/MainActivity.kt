@@ -189,6 +189,25 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            /**
+             * Rebuild derived rows from events, which are the source of truth
+             * (M1 contract: buckets/rollups are DERIVED, never synced).
+             *
+             * A pre-fix binary could leave derived rows no event explains —
+             * e.g. the old idle-accrual bug wrote a session that never
+             * closed, and its ~24h of full-minute buckets survived even
+             * after the events themselves were corrected. Wipe and re-derive
+             * so the numbers shown always trace back to real events.
+             */
+            fun rebuildDerived() {
+                val allEvents = store.eventsAfter(deviceId, Long.MIN_VALUE)
+                store.clearDerived(deviceId)
+                allEvents.forEach { event ->
+                    RollupEngine.bucket(event).forEach(store::insertBucket)
+                }
+                recomputeHistoryRollups()
+            }
+
             fun persistEvent(event: FocusEvent) {
                 store.insertEvent(event)
                 RollupEngine.bucket(event).forEach(store::insertBucket)
@@ -240,7 +259,9 @@ class MainActivity : ComponentActivity() {
                         liveAppName = nameResolver.resolve(change.appKey) ?: change.appKey.value
                         liveSinceMs = change.atMs
                     }
-                    recomputeHistoryRollups()
+                    // Repair any derived rows left by earlier buggy writers,
+                    // then keep them honest on every launch.
+                    rebuildDerived()
                 }
                 render()
                 refreshTotals(0)

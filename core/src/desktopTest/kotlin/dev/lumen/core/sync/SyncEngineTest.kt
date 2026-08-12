@@ -201,6 +201,7 @@ class SyncEngineTest {
 
         override fun insertBucket(bucket: MinuteBucket) {}
         override fun bucketsForRange(deviceId: DeviceId, dayStartMs: Long, dayEndMs: Long) = emptyList<MinuteBucket>()
+        override fun clearDerived(deviceId: DeviceId) {}
 
         override fun upsertRollup(rollup: AppDayRollup) {}
         override fun rollupsForDay(deviceId: DeviceId, dayUtc: String) = emptyList<AppDayRollup>()

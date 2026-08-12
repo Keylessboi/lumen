@@ -162,6 +162,18 @@ DELETE FROM events WHERE started_at_ms < ?;
 pruneBucketsBefore:
 DELETE FROM buckets WHERE bucket_ts < ?;
 
+-- Derived-data rebuild: buckets and rollups are DERIVED from events (M1
+-- contract: "buckets/rollups are DERIVED, never synced"). Clearing them
+-- per device lets the app re-derive from honest events when derived rows
+-- have drifted (e.g. written by a pre-fix binary). Events are untouched.
+-- NOTE: SQLDelight generates ONE statement per query — the rollup delete
+-- lives in its own query or it silently never runs.
+clearBucketsForDevice:
+DELETE FROM buckets WHERE device_id = ?;
+
+clearRollupsForDevice:
+DELETE FROM rollups WHERE device_id = ?;
+
 selectControlState:
 SELECT * FROM control_state WHERE control_key = ?;
 
