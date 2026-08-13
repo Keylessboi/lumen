@@ -277,13 +277,25 @@ private fun AppRow(
         Modifier.fillMaxWidth().height(ROW_HEIGHT),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            row.displayName,
-            style = TextStyle(color = LumenTheme.TextPrimary, fontSize = 14.sp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(190.dp),
-        )
+        Column(
+            Modifier.width(190.dp),
+        ) {
+            Text(
+                row.displayName,
+                style = TextStyle(color = LumenTheme.TextPrimary, fontSize = 14.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Local-only process hint (what a terminal was running); never synced.
+            row.titleHint?.let { hint ->
+                Text(
+                    hint,
+                    style = TextStyle(color = LumenTheme.TextSecondary, fontSize = 10.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
 
         Box(
             Modifier

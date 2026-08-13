@@ -141,6 +141,7 @@ class SwayCollector(
             appKey = resolveAppKey(appValue),
             atMs = System.currentTimeMillis(),
             displayName = displayNameFor(appValue),
+            titleHint = titleHintFor(jsonStringField(payload, "name")),
         )
     }
 
@@ -336,7 +337,11 @@ class SwayCollector(
     private fun displayNameFor(raw: String): String? =
         raw.trim().takeIf { it.isNotEmpty() }
 
+    private fun titleHintFor(raw: String?): String? =
+        raw?.trim()?.takeIf { it.isNotEmpty() }?.take(TITLE_HINT_MAX_CHARS)
+
     companion object {
+        private const val TITLE_HINT_MAX_CHARS = 64
         private val MAGIC = "i3-ipc".toByteArray(StandardCharsets.US_ASCII)
         private const val HEADER_SIZE = 14
         private const val TYPE_SUBSCRIBE = 2

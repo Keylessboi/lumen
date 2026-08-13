@@ -89,8 +89,16 @@ class X11Collector(
             appKey = resolveAppKey(appClass),
             atMs = System.currentTimeMillis(),
             displayName = appClass,
+            titleHint = titleHintFor(queryWindowProperty(windowId, "_NET_WM_NAME")),
         )
     }.getOrNull()
+
+    private fun titleHintFor(raw: String?): String? =
+        raw?.trim()?.takeIf { it.isNotEmpty() }?.take(TITLE_HINT_MAX_CHARS)
+
+    private companion object {
+        private const val TITLE_HINT_MAX_CHARS = 64
+    }
 
     internal fun parseWmClass(raw: String): String? {
         // WM_CLASS(STRING) = "instance", "class"

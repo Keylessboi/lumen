@@ -1,8 +1,10 @@
 package dev.lumen.core.sync
 
+import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.DeviceId
 import dev.lumen.core.model.RecordKind
 import dev.lumen.core.model.SyncRecord
+import dev.lumen.core.model.SyncState
 import dev.lumen.core.store.LumenStore
 
 /**
@@ -160,22 +162,60 @@ data class SyncReport(
  */
 private val syncJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
+/**
+ * The EVENT wire shape — deliberately NOT [dev.lumen.core.model.FocusEvent].
+ *
+ * `FocusEvent.titleHash` is a local-only process/window hint (docs/e2ee.md
+ * §3: "window titles never leave the device in any form"). Serializing the
+ * domain type directly would put it on the wire whenever a collector set it;
+ * this DTO structurally cannot carry it, so the hard rule is enforced by the
+ * type system rather than by collector discipline.
+ */
+@kotlinx.serialization.Serializable
+private data class FocusEventWire(
+    val seq: Long,
+    val deviceId: DeviceId,
+    val appKey: AppKey,
+    val startedAtMs: Long,
+    val durationMs: Long,
+    val category: String? = null,
+    val syncState: SyncState = SyncState.LOCAL,
+)
+
 private fun dev.lumen.core.model.FocusEvent.toSyncRecord() =
     SyncRecord(
         deviceId = deviceId,
         seq = seq,
         kind = RecordKind.EVENT,
         payload = syncJson.encodeToString(
-            dev.lumen.core.model.FocusEvent.serializer(),
-            this,
+            FocusEventWire.serializer(),
+            FocusEventWire(
+                seq = seq,
+                deviceId = deviceId,
+                appKey = appKey,
+                startedAtMs = startedAtMs,
+                durationMs = durationMs,
+                category = category,
+                syncState = syncState,
+            ),
         ).toByteArray(),
     )
 
 private fun SyncRecord.toFocusEvent() =
-    syncJson.decodeFromString(
-        dev.lumen.core.model.FocusEvent.serializer(),
+    syncJson.decodeFromString<FocusEventWire>(
         String(payload),
-    )
+    ).let {
+        dev.lumen.core.model.FocusEvent(
+            seq = it.seq,
+            deviceId = it.deviceId,
+            appKey = it.appKey,
+            titleHash = null, // never on the wire; receiver has no title for it
+            startedAtMs = it.startedAtMs,
+            durationMs = it.durationMs,
+            category = it.category,
+            syncState = it.syncState,
+        )
+    }
 
 private fun SyncRecord.toAppDayRollup() =
     syncJson.decodeFromString(

@@ -34,4 +34,11 @@ data class AppTotal(
      * up passes rows without one and the screen still draws.
      */
     val category: String? = null,
+    /**
+     * Local-only process/window hint for this app's most recent session
+     * (e.g. what a terminal was running). NEVER synced — the wire DTO has
+     * no such field (docs/e2ee.md §3 hard rule). Null when the platform
+     * collector does not capture titles.
+     */
+    val titleHint: String? = null,
 )

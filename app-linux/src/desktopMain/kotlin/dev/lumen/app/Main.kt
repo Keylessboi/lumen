@@ -105,9 +105,24 @@ private fun runApp() = application {
             averageMs = if (complete.isEmpty()) null else complete.sumOf { it.totalMs } / complete.size
         }
 
+        /**
+         * Latest local title hint per app, for today's events. Local-only:
+         * never synced (docs/e2ee.md §3), shown only in this device's UI.
+         */
+        fun titleHintsForToday(): Map<AppKey, String> {
+            val dayStart = UtcDay.boundary(UtcDay.today())
+            val hints = mutableMapOf<AppKey, String>()
+            store.eventsAfter(deviceId, Long.MIN_VALUE)
+                .asSequence()
+                .filter { it.startedAtMs >= dayStart && it.titleHash != null }
+                .forEach { hints[it.appKey] = it.titleHash!! }
+            return hints
+        }
+
         fun render() {
             val today = UtcDay.today()
             val rollups = store.rollupsForDay(deviceId, today)
+            val hints = titleHintsForToday()
             // storedTotalMs must exclude the idle key: locked screen time is
             // not screen time, and the UI total feeds off this.
             storedTotalMs = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
@@ -119,6 +134,7 @@ private fun runApp() = application {
                         appKey = rollup.appKey,
                         displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
                         totalMs = rollup.totalMs,
+                        titleHint = hints[rollup.appKey],
                     )
                 }
             storedTotals = totals
@@ -134,6 +150,7 @@ private fun runApp() = application {
         // time quadratically and inflates the day).
         fun refreshTotals(liveMs: Long) {
             val base = storedTotals.associate { it.appKey to it.totalMs }.toMutableMap()
+            val hints = titleHintsForToday()
             val liveKey = liveAppKey
             if (liveKey != null && liveMs > 0) {
                 base.merge(liveKey, liveMs, Long::plus)
@@ -148,6 +165,7 @@ private fun runApp() = application {
                         appKey = appKey,
                         displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
                         totalMs = ms,
+                        titleHint = hints[appKey],
                     )
                 }
             totals = decorate(totals)

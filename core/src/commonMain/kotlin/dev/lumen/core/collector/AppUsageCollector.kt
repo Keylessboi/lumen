@@ -83,6 +83,13 @@ data class FocusChange(
      * synced — see `docs/e2ee.md` §3.
      */
     val displayName: String? = null,
+    /**
+     * Local-only process/window hint (e.g. what a terminal was running),
+     * truncated to a display-safe length. NEVER synced — the sync layer
+     * serializes a DTO without this field, so it cannot leave the device
+     * even by accident (see `docs/e2ee.md` §3 hard rule).
+     */
+    val titleHint: String? = null,
     /** True when the transition is to "no app focused" (idle, locked, screen off). */
     val isIdle: Boolean = false,
 )
