@@ -12,7 +12,9 @@ import dev.lumen.app.collector.UsageStatsCollector
 import dev.lumen.app.names.PackageManagerNameResolver
 import dev.lumen.core.category.DayView
 import dev.lumen.core.category.sessionCategoryEngine
+import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.clock.UtcDay
+import kotlinx.datetime.TimeZone
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.AppKey
@@ -99,37 +101,48 @@ class MainActivity : ComponentActivity() {
             // query on the main thread, which blocked on the SQLite lock the
             // IO backfill holds — that is the ANR ("Input dispatching timed
             // out") that reappeared even after the backfill was batched.
+            fun displayZone(): TimeZone {
+                val stored = store.setting(LocalDay.SETTING_KEY)?.value?.toString(Charsets.UTF_8)
+                return LocalDay.zoneOf(stored)
+            }
+
             suspend fun render() = withContext(Dispatchers.IO) {
-                val today = UtcDay.today()
-                val rollups = store.rollupsForDay(deviceId, today)
+                val zone = displayZone()
+                val today = LocalDay.today(zone)
+                val dayStart = LocalDay.startOfDayMs(today, zone)
+                val dayEnd = LocalDay.endOfDayMs(today, zone)
                 // storedTotalMs must exclude the idle key: locked screen time
-                // is not screen time, and the UI total feeds off this.
-                val storedTotal = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
-                val list = rollups
+                // is not screen time, and the UI total feeds off this. The
+                // Today number is the USER's day (LocalDay, discussion #29),
+                // summed from buckets over the local-day window — a UTC-day
+                // read reset it at 8pm local.
+                val todayBuckets = store.bucketsForRange(deviceId, dayStart, dayEnd)
                     .filter { it.appKey.value.isNotBlank() }
-                    .sortedByDescending { it.totalMs }
-                    .map { rollup ->
+                val storedTotal = todayBuckets.sumOf { it.activeMs }
+                val byApp = todayBuckets.groupBy { it.appKey }
+                val list = byApp
+                    .map { (appKey, buckets) ->
                         AppTotal(
-                            appKey = rollup.appKey,
-                            displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
-                            totalMs = rollup.totalMs,
+                            appKey = appKey,
+                            displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
+                            totalMs = buckets.sumOf { it.activeMs },
                         )
                     }
+                    .sortedByDescending { it.totalMs }
 
-                // Recent days for the trend chart, in the same UTC-day
-                // arithmetic macOS and Linux use — a local-zone daysBetween
-                // here produced a day labelled as future when the device zone
-                // is ahead of UTC, because isToday compared against the UTC
-                // day while the list carried local days.
-                val days = (HISTORY_WINDOW_DAYS - 1 downTo 0).map { back ->
-                    UtcDay.dayOf(UtcDay.boundary(today) - back * MILLIS_PER_DAY)
-                }
-                val dayTotals = days.map { dayUtc ->
-                    val dayStart = UtcDay.boundary(dayUtc)
-                    val dayMs = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                // Recent days for the trend chart, on the same local-day
+                // boundaries as "Today" — the chart and the big number must
+                // agree (design-spec: "numbers and charts must agree").
+                val todayStartMs = LocalDay.startOfDayMs(today, zone)
+                val windowStart = LocalDay.startOfDayMs(today, zone) - (HISTORY_WINDOW_DAYS - 1) * MILLIS_PER_DAY
+                val days = LocalDay.daysBetween(windowStart, todayStartMs, zone)
+                val dayTotals = days.map { dayLocal ->
+                    val dayStartMs = LocalDay.startOfDayMs(dayLocal, zone)
+                    val dayEndMs = LocalDay.endOfDayMs(dayLocal, zone)
+                    val dayMs = store.bucketsForRange(deviceId, dayStartMs, dayEndMs)
                         .filter { it.appKey.value.isNotBlank() }
                         .sumOf { it.activeMs }
-                    DayTotal(dayUtc = dayUtc, totalMs = dayMs, isToday = dayUtc == today)
+                    DayTotal(dayUtc = dayLocal, totalMs = dayMs, isToday = dayLocal == today)
                 }
                 RenderSnapshot(
                     storedTotal = storedTotal,
@@ -327,8 +340,10 @@ class MainActivity : ComponentActivity() {
                         dayDetail = null
                     } else {
                         selectedDay = dayUtc
-                        val dayStart = UtcDay.boundary(dayUtc)
-                        val dayTotals = store.bucketsForRange(deviceId, dayStart, dayStart + 86_400_000)
+                        val zone = displayZone()
+                        val dayStart = LocalDay.startOfDayMs(dayUtc, zone)
+                        val dayEnd = LocalDay.endOfDayMs(dayUtc, zone)
+                        val dayTotals = store.bucketsForRange(deviceId, dayStart, dayEnd)
                             .filter { it.appKey.value.isNotBlank() }
                             .groupBy { it.appKey }
                             .map { (appKey, bs) ->
