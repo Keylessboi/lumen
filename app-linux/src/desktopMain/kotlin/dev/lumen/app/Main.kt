@@ -1,15 +1,25 @@
 package dev.lumen.app
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import kotlinx.coroutines.launch
 import dev.lumen.app.collector.HyprlandCollector
 import dev.lumen.app.names.DesktopEntryNameResolver
 import dev.lumen.core.clock.LocalDay
@@ -27,6 +37,12 @@ import dev.lumen.core.category.sessionCategoryEngine
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
 import dev.lumen.core.store.JvmLumenStore
+import dev.lumen.transport.XmppTransport
+import dev.lumen.transport.providers.Providers
+import dev.lumen.ui.AccountProviderOption
+import dev.lumen.ui.AccountSection
+import dev.lumen.ui.AccountUiState
+import dev.lumen.ui.LumenTheme
 import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.charts.CategorySlice
 import dev.lumen.ui.charts.DayDetail
@@ -262,7 +278,87 @@ private fun runApp() = application {
 
         val reducedMotion = remember { reducedMotionEnabled() }
 
-        TodayScreen(
+        // ---- account / sync surface (M4) ----
+        val syncManager = remember { SyncManager(store, deviceId) }
+        var accountState by remember {
+            mutableStateOf<AccountUiState>(
+                if (syncManager.isConfigured()) {
+                    val cfg = syncManager.account()
+                    AccountUiState.Connected(cfg?.jid ?: "", cfg?.host ?: "")
+                } else {
+                    AccountUiState.Unconfigured
+                },
+            )
+        }
+        var showAccount by remember { mutableStateOf(false) }
+
+        val providerOptions = remember {
+            Providers.all.map { AccountProviderOption(jid = it.jid, tier = it.tier) }
+        }
+        val accountScope = rememberCoroutineScope()
+
+        fun configure(providerJid: String, username: String, password: String) {
+            accountState = AccountUiState.Working("Connecting to $providerJid\u2026")
+            val parts = providerJid.split("@")
+            val host = parts.lastOrNull() ?: providerJid
+            syncManager.saveAccount(
+                AccountConfig(
+                    host = host,
+                    port = 5222,
+                    jid = "$username@$host",
+                    password = password,
+                ),
+            )
+            accountState = AccountUiState.Connected("$username@$host", host)
+        }
+
+        fun register(providerJid: String, username: String, password: String) {
+            accountState = AccountUiState.Working("Creating account on $providerJid\u2026")
+            val parts = providerJid.split("@")
+            val host = parts.lastOrNull() ?: providerJid
+            val jid = "$username@$host"
+            accountScope.launch {
+                runCatching {
+                    val xmpp = XmppTransport(host = host, port = 5222, jid = jid, password = password)
+                    xmpp.register(username, password)
+                }.onSuccess {
+                    configure(providerJid, username, password)
+                }.onFailure { e ->
+                    accountState = AccountUiState.Failed("Registration failed: ${e.message ?: e::class.simpleName}")
+                }
+            }
+        }
+
+        Row {
+            listOf("Today", "Sync").forEach { label ->
+                val selected = (label == "Sync") == showAccount
+                Text(
+                    label,
+                    style = TextStyle(
+                        color = if (selected) LumenTheme.TextPrimary else LumenTheme.TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    ),
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .clickable { showAccount = label == "Sync" },
+                )
+            }
+        }
+
+        if (showAccount) {
+            AccountSection(
+                providers = providerOptions,
+                state = accountState,
+                onRegister = ::register,
+                onSave = ::configure,
+                onDisconnect = {
+                    syncManager.clearAccount()
+                    accountState = AccountUiState.Unconfigured
+                },
+            )
+        } else {
+            TodayScreen(
             totals = totals,
             categories = categories,
             recentDays = recentDays,
@@ -295,7 +391,8 @@ private fun runApp() = application {
             totalMs = storedTotalMs + liveMs,
             liveApp = liveApp,
             reducedMotion = reducedMotion,
-        )
+            )
+        }
     }
 }
 
