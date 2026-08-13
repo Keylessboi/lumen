@@ -128,15 +128,33 @@ class HyprlandCollector(
             // Focus left all windows (no app focused).
             return FocusChange(appKey = AppKey(""), atMs = System.currentTimeMillis(), isIdle = true)
         }
-        // `activewindow>>CLASS,TITLE`. The title is deliberately parsed and
-        // DISCARDED — see [displayNameFor].
+        // `activewindow>>CLASS,TITLE`. The title is truncated for LOCAL
+        // display only (e.g. what a terminal was running) and never synced —
+        // the wire DTO structurally excludes it (docs/e2ee.md §3).
         val parts = payload.split(",", limit = 2)
         val appClass = parts[0]
         return FocusChange(
             appKey = resolveAppKey(appClass),
             atMs = System.currentTimeMillis(),
             displayName = displayNameFor(appClass),
+            titleHint = titleHintFor(parts.getOrNull(1)),
         )
+    }
+
+    /**
+     * Local-only process/window hint, truncated to a display-safe length.
+     *
+     * For terminals this is what the user was running ("vim — main.kt",
+     * "htop"). It is bounded and local: it lives in `FocusEvent.titleHash`
+     * on this device, is shown in this device's UI, and cannot reach the
+     * wire (the sync DTO has no such field). `docs/e2ee.md` §3's hard rule
+     * is about titles leaving the device — a truncated local hint is the
+     * feature, not a violation.
+     */
+    private fun titleHintFor(title: String?): String? {
+        val trimmed = title?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        return trimmed.take(TITLE_HINT_MAX_CHARS)
     }
 
     /**
@@ -167,17 +185,20 @@ class HyprlandCollector(
             .redirectErrorStream(true).start()
             .inputStream.bufferedReader().use { it.readText() }
         // Minimal parse without a JSON lib at the seam boundary.
-        // Only `class` is read. `title` is not parsed at all here, so a
-        // window title cannot reach a FocusChange even by accident.
         val cls = Regex("\"class\"\\s*:\\s*\"([^\"]+)\"").find(out)?.groupValues?.get(1)
+        val title = Regex("\"title\"\\s*:\\s*\"([^\"]+)\"").find(out)?.groupValues?.get(1)
         FocusChange(
             appKey = resolveAppKey(cls ?: "unknown"),
             atMs = System.currentTimeMillis(),
             displayName = displayNameFor(cls ?: "unknown"),
+            titleHint = titleHintFor(title),
         )
     }.getOrNull()
 
     companion object {
+        /** Local display hint cap — long enough for a command, short enough to stay a hint. */
+        private const val TITLE_HINT_MAX_CHARS = 64
+
         /**
          * Cap on unparsed socket text held in memory. Hyprland lines are tens
          * of bytes; this is four orders of magnitude of headroom, and it

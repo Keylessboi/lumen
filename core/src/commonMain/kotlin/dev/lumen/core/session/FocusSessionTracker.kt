@@ -32,11 +32,12 @@ class FocusSessionTracker(
 ) {
     private var openApp: AppKey? = null
     private var openName: String? = null
+    private var openTitleHint: String? = null
     private var openedAt: Long = 0L
 
     /** The app currently in focus and when it took focus, or null before the first change. */
     val open: OpenSession?
-        get() = openApp?.let { OpenSession(it, openName, openedAt) }
+        get() = openApp?.let { OpenSession(it, openName, openTitleHint, openedAt) }
 
     /**
      * Record a transition. Returns the event that just closed, or null when
@@ -51,6 +52,7 @@ class FocusSessionTracker(
         val closed = closeAt(change.atMs)
         openApp = change.appKey
         openName = change.displayName
+        openTitleHint = change.titleHint
         openedAt = change.atMs
         return closed
     }
@@ -67,6 +69,7 @@ class FocusSessionTracker(
             seq = nextSeq++,
             deviceId = deviceId,
             appKey = app,
+            titleHash = openTitleHint,
             startedAtMs = openedAt,
             durationMs = duration,
         )
@@ -75,6 +78,7 @@ class FocusSessionTracker(
     data class OpenSession(
         val appKey: AppKey,
         val displayName: String?,
+        val titleHint: String?,
         val sinceMs: Long,
     )
 }

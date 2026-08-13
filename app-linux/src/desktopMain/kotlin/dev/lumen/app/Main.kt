@@ -12,7 +12,9 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.lumen.app.collector.HyprlandCollector
 import dev.lumen.app.names.DesktopEntryNameResolver
+import dev.lumen.core.clock.LocalDay
 import dev.lumen.core.clock.UtcDay
+import kotlinx.datetime.TimeZone
 import dev.lumen.core.collector.AppNameResolver
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
@@ -83,18 +85,41 @@ private fun runApp() = application {
         fun slices(rows: List<AppTotal>): List<CategorySlice> =
             dayView.categoryNames(rows).map { (name, ms) -> CategorySlice(name, ms) }
 
-        /** Per-day totals for the trend chart, straight from stored rollups. */
+        /**
+         * The display day is the USER's day, not the UTC day — discussion #29.
+         * At UTC-4 the UTC day rolls at 20:00 local, so the "Today" number
+         * reset at 8pm every evening. The zone comes from the reconciled
+         * display.timezone setting (defaults to the device zone); the Today
+         * screen sums buckets over that zone's local-day window, because
+         * buckets carry absolute timestamps and a local day is a different
+         * window over the same data.
+         */
+        fun displayZone(): TimeZone {
+            val stored = store.setting(LocalDay.SETTING_KEY)?.value?.toString(Charsets.UTF_8)
+            return LocalDay.zoneOf(stored)
+        }
+
+        fun localDayTotals(zone: TimeZone, dayLocal: String): List<Pair<AppKey, Long>> {
+            val dayStart = LocalDay.startOfDayMs(dayLocal, zone)
+            val dayEnd = LocalDay.endOfDayMs(dayLocal, zone)
+            return store.bucketsForRange(deviceId, dayStart, dayEnd)
+                .filter { it.appKey.value.isNotBlank() }
+                .groupBy { it.appKey }
+                .map { (app, buckets) -> app to buckets.sumOf { it.activeMs } }
+                .sortedByDescending { it.second }
+        }
+
         fun loadHistory() {
-            val today = UtcDay.today()
-            val days = (HISTORY_WINDOW_DAYS - 1 downTo 0).map { back ->
-                UtcDay.dayOf(UtcDay.boundary(today) - back * MILLIS_PER_DAY)
-            }
+            val zone = displayZone()
+            val today = LocalDay.today(zone)
+            val todayStart = LocalDay.startOfDayMs(today, zone)
+            val windowStart = LocalDay.startOfDayMs(today, zone) - (HISTORY_WINDOW_DAYS - 1) * MILLIS_PER_DAY
+            val days = LocalDay.daysBetween(windowStart, todayStart, zone)
             recentDays = days.map { d ->
+                val totalMs = localDayTotals(zone, d).sumOf { it.second }
                 DayTotal(
                     dayUtc = d,
-                    totalMs = store.rollupsForDay(deviceId, d)
-                        .filter { it.appKey.value.isNotBlank() }
-                        .sumOf { it.totalMs },
+                    totalMs = totalMs,
                     isToday = d == today,
                 )
             }
@@ -105,22 +130,35 @@ private fun runApp() = application {
             averageMs = if (complete.isEmpty()) null else complete.sumOf { it.totalMs } / complete.size
         }
 
+        /**
+         * Latest local title hint per app, for today's events. Local-only:
+         * never synced (docs/e2ee.md §3), shown only in this device's UI.
+         */
+        fun titleHintsForToday(): Map<AppKey, String> {
+            val zone = displayZone()
+            val dayStart = LocalDay.startOfDayMs(LocalDay.today(zone), zone)
+            val hints = mutableMapOf<AppKey, String>()
+            store.eventsAfter(deviceId, Long.MIN_VALUE)
+                .asSequence()
+                .filter { it.startedAtMs >= dayStart && it.titleHash != null }
+                .forEach { hints[it.appKey] = it.titleHash!! }
+            return hints
+        }
+
         fun render() {
-            val today = UtcDay.today()
-            val rollups = store.rollupsForDay(deviceId, today)
-            // storedTotalMs must exclude the idle key: locked screen time is
-            // not screen time, and the UI total feeds off this.
-            storedTotalMs = rollups.filter { it.appKey.value.isNotBlank() }.sumOf { it.totalMs }
-            totals = rollups
-                .filter { it.appKey.value.isNotBlank() }
-                .sortedByDescending { it.totalMs }
-                .map { rollup ->
-                    AppTotal(
-                        appKey = rollup.appKey,
-                        displayName = nameResolver.resolve(rollup.appKey) ?: day.nameFor(rollup.appKey),
-                        totalMs = rollup.totalMs,
-                    )
-                }
+            val zone = displayZone()
+            val today = LocalDay.today(zone)
+            val hints = titleHintsForToday()
+            val appTotals = localDayTotals(zone, today)
+            storedTotalMs = appTotals.sumOf { it.second }
+            totals = appTotals.map { (appKey, ms) ->
+                AppTotal(
+                    appKey = appKey,
+                    displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
+                    totalMs = ms,
+                    titleHint = hints[appKey],
+                )
+            }
             storedTotals = totals
             totals = decorate(totals)
             categories = slices(totals)
@@ -134,6 +172,7 @@ private fun runApp() = application {
         // time quadratically and inflates the day).
         fun refreshTotals(liveMs: Long) {
             val base = storedTotals.associate { it.appKey to it.totalMs }.toMutableMap()
+            val hints = titleHintsForToday()
             val liveKey = liveAppKey
             if (liveKey != null && liveMs > 0) {
                 base.merge(liveKey, liveMs, Long::plus)
@@ -148,6 +187,7 @@ private fun runApp() = application {
                         appKey = appKey,
                         displayName = nameResolver.resolve(appKey) ?: day.nameFor(appKey),
                         totalMs = ms,
+                        titleHint = hints[appKey],
                     )
                 }
             totals = decorate(totals)
@@ -190,14 +230,17 @@ private fun runApp() = application {
         }
 
         LaunchedEffect(Unit) {
-            var lastDay = UtcDay.today()
+            var lastDay = LocalDay.today(displayZone())
             while (true) {
                 now = System.currentTimeMillis()
-                val today = UtcDay.today()
-                // UTC midnight rollover: the cached render (and its stored
-                // rollup totals) belong to yesterday. Without this the UI
-                // keeps showing yesterday's day until the next focus change,
-                // which for an app left open overnight is all morning.
+                val today = LocalDay.today(displayZone())
+                // Local midnight rollover, not UTC: the display day is the
+                // user's day (discussion #29), and a UTC-bound ticker reset
+                // the Today number at 8pm for a UTC-4 user. The cached render
+                // (and its stored rollup totals) belong to the previous day;
+                // without this the UI keeps showing yesterday's day until the
+                // next focus change, which for an app left open overnight is
+                // all morning.
                 if (today != lastDay) {
                     lastDay = today
                     day.clear()
@@ -232,16 +275,15 @@ private fun runApp() = application {
                     dayDetail = null
                 } else {
                     selectedDay = d
+                    val zone = displayZone()
                     val rows = decorate(
-                        store.rollupsForDay(deviceId, d)
-                            .filter { it.appKey.value.isNotBlank() }
-                            .map {
-                                AppTotal(
-                                    appKey = it.appKey,
-                                    displayName = nameResolver.resolve(it.appKey) ?: it.appKey.value,
-                                    totalMs = it.totalMs,
-                                )
-                            },
+                        localDayTotals(zone, d).map { (appKey, ms) ->
+                            AppTotal(
+                                appKey = appKey,
+                                displayName = nameResolver.resolve(appKey) ?: appKey.value,
+                                totalMs = ms,
+                            )
+                        },
                     )
                     dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
                 }
