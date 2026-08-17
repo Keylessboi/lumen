@@ -35,6 +35,16 @@ kotlin {
                 implementation(libs.kotlin.test)
             }
         }
+        val androidInstrumentedTest by getting {
+            dependencies {
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.ext.junit)
+                implementation(libs.androidx.test.core)
+                // X25519 reconstruction in AndroidKeychainTest (same BC the
+                // keychain itself uses to generate the pair).
+                implementation(libs.bouncycastle)
+            }
+        }
     }
 }
 
@@ -66,6 +76,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // LOCKED hardening — see docs/plan.md locked decision #10.
@@ -74,6 +85,10 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             manifestPlaceholders["enableBackup"] = "false"
         }
         getByName("debug") {

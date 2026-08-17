@@ -26,10 +26,13 @@ kotlin {
                 implementation(libs.kotlinx.serialization.json)
             }
         }
-        // Smack is JVM-only (no native targets), so the XMPP client lives in
-        // desktopMain; the sync seam it implements is in core commonMain.
-        // Android ships its own transport work in androidMain later.
-        val desktopMain by getting {
+        // Smack is pure Java — works on both desktop JVM and Android
+        // (API 26+, matching our minSdk). The XMPP client lives in this
+        // shared intermediate source set so both targets use the same
+        // implementation without code duplication. The sync seam it
+        // implements is in core commonMain.
+        val jvmMain by creating {
+            dependsOn(commonMain)
             dependencies {
                 implementation(libs.smack.core)
                 implementation(libs.smack.tcp)
@@ -37,6 +40,12 @@ kotlin {
                 implementation(libs.smack.xmlparser.stax)
                 implementation(libs.smack.resolver.minidns)
             }
+        }
+        val desktopMain by getting {
+            dependsOn(jvmMain)
+        }
+        val androidMain by getting {
+            dependsOn(jvmMain)
         }
         val commonTest by getting {
             dependencies {

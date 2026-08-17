@@ -49,6 +49,18 @@ import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
 import kotlinx.coroutines.delay
 import java.io.File
+import dev.lumen.core.rollup.RecapEngine
+import dev.lumen.core.model.RecapSummary
+import dev.lumen.ui.charts.WeeklyRecapScreen
+import dev.lumen.ui.charts.MonthlyRecapScreen
+import dev.lumen.ui.charts.YearlyRecapScreen
+import dev.lumen.ui.charts.MonthTotal
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.datetime.plus
 
 /**
  * Lumen for Linux.
@@ -87,6 +99,10 @@ private fun runApp() = application {
         var categories by remember { mutableStateOf(emptyList<CategorySlice>()) }
         var recentDays by remember { mutableStateOf(emptyList<DayTotal>()) }
         var averageMs by remember { mutableStateOf<Long?>(null) }
+        var selectedTab by remember { mutableStateOf("Today") }
+        var selectedPeriod by remember { mutableStateOf("Week") }
+        var recapSummary by remember { mutableStateOf<RecapSummary?>(null) }
+
         var selectedDay by remember { mutableStateOf<String?>(null) }
         var dayDetail by remember { mutableStateOf<DayDetail?>(null) }
 
@@ -210,9 +226,53 @@ private fun runApp() = application {
             categories = slices(totals)
         }
 
+        fun dailyTotalsForRange(startMs: Long, endMs: Long): List<DayTotal> {
+            val zone = displayZone()
+            val tz = TimeZone.UTC
+            val startDate = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(tz).date
+            val endDate = Instant.fromEpochMilliseconds(endMs).toLocalDateTime(tz).date
+            val today = LocalDay.today(zone)
+
+            val days = mutableListOf<DayTotal>()
+            var current = startDate
+            while (current <= endDate) {
+                val dayStr = current.toString()
+                val dayStart = LocalDay.startOfDayMs(dayStr, zone)
+                val dayEnd = LocalDay.endOfDayMs(dayStr, zone)
+                val totalMs = store.bucketsForRange(deviceId, dayStart, dayEnd)
+                    .sumOf { it.activeMs }
+                days.add(DayTotal(dayUtc = dayStr, totalMs = totalMs, isToday = dayStr == today))
+                current = current.plus(1, DateTimeUnit.DAY)
+            }
+            return days
+        }
+
+        fun monthlyTotalsForYear(year: Int): List<MonthTotal> {
+            val monthNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            val tz = TimeZone.UTC
+
+            return (1..12).map { month ->
+                val monthStart = LocalDate(year, month, 1)
+                val monthEnd = monthStart.plus(1, DateTimeUnit.MONTH)
+                val monthStartMs = monthStart.atStartOfDayIn(tz).toEpochMilliseconds()
+                val monthEndMs = monthEnd.atStartOfDayIn(tz).toEpochMilliseconds()
+
+                val totalMs = store.bucketsForRange(deviceId, monthStartMs, monthEndMs)
+                    .sumOf { it.activeMs }
+
+                MonthTotal(monthIndex = month - 1, label = monthNames[month - 1], totalMs = totalMs)
+            }
+        }
+
+        fun loadRecap() {
+            recapSummary = RecapEngine.fullRecap(store, deviceId, System.currentTimeMillis())
+        }
+
         LaunchedEffect(Unit) {
             render()
             loadHistory()
+            loadRecap()
             collector.focusChanges().collect { change ->
                 day.remember(change)
                 tracker.onChange(change)?.let { closed ->
@@ -262,6 +322,7 @@ private fun runApp() = application {
                     day.clear()
                     render()
                     loadHistory()
+                    loadRecap()
                     liveSinceMs = 0L
                     liveAppKey = null
                     liveApp = null
@@ -290,7 +351,6 @@ private fun runApp() = application {
                 },
             )
         }
-        var showAccount by remember { mutableStateOf(false) }
 
         val providerOptions = remember {
             Providers.all.map { AccountProviderOption(jid = it.jid, tier = it.tier) }
@@ -330,8 +390,8 @@ private fun runApp() = application {
         }
 
         Row {
-            listOf("Today", "Sync").forEach { label ->
-                val selected = (label == "Sync") == showAccount
+            listOf("Today", "Recaps", "Sync").forEach { label ->
+                val selected = label == selectedTab
                 Text(
                     label,
                     style = TextStyle(
@@ -341,13 +401,13 @@ private fun runApp() = application {
                     ),
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 8.dp)
-                        .clickable { showAccount = label == "Sync" },
+                        .clickable { selectedTab = label },
                 )
             }
         }
 
-        if (showAccount) {
-            AccountSection(
+        when (selectedTab) {
+            "Sync" -> AccountSection(
                 providers = providerOptions,
                 state = accountState,
                 onRegister = ::register,
@@ -357,40 +417,111 @@ private fun runApp() = application {
                     accountState = AccountUiState.Unconfigured
                 },
             )
-        } else {
-            TodayScreen(
-            totals = totals,
-            categories = categories,
-            recentDays = recentDays,
-            averageMs = averageMs,
-            selectedDay = selectedDay,
-            dayDetail = dayDetail,
-            onSelectDay = { d ->
-                if (d == selectedDay) {
+            "Recaps" -> {
+                Row(Modifier.padding(start = 32.dp, top = 16.dp)) {
+                    listOf("Week", "Month", "Year").forEach { period ->
+                        val selected = period == selectedPeriod
+                        Text(
+                            period,
+                            style = TextStyle(
+                                color = if (selected) LumenTheme.TextPrimary else LumenTheme.TextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            ),
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .clickable { selectedPeriod = period },
+                        )
+                    }
+                }
+
+                val summary = recapSummary
+                if (summary != null) {
+                    when (selectedPeriod) {
+                        "Week" -> summary.week?.let { period ->
+                            val days = dailyTotalsForRange(period.startMs, period.endMs)
+                            WeeklyRecapScreen(
+                                days = days,
+                                topApps = period.appBreakdown,
+                                averageMs = averageMs,
+                                targetMs = period.targetMs,
+                                reducedMotion = reducedMotion,
+                            )
+                        }
+                        "Month" -> summary.month?.let { period ->
+                            val days = dailyTotalsForRange(period.startMs, period.endMs)
+                            val monthDate = Instant.fromEpochMilliseconds(period.startMs)
+                                .toLocalDateTime(TimeZone.UTC).date
+                            val monthLabel = monthDate.month.name.lowercase()
+                                .replaceFirstChar { it.uppercase() } + " ${monthDate.year}"
+                            MonthlyRecapScreen(
+                                monthLabel = monthLabel,
+                                days = days,
+                                totalMs = period.totalMs,
+                                targetMs = period.targetMs,
+                                categories = emptyList(),
+                                previousMonthMs = null,
+                            )
+                        }
+                        "Year" -> summary.year?.let { period ->
+                            val yearDate = Instant.fromEpochMilliseconds(period.startMs)
+                                .toLocalDateTime(TimeZone.UTC).date
+                            val months = monthlyTotalsForYear(yearDate.year)
+                            val monthlyAvg = if (months.isNotEmpty()) {
+                                months.sumOf { it.totalMs } / months.size
+                            } else null
+                            YearlyRecapScreen(
+                                months = months,
+                                topApps = period.appBreakdown,
+                                monthlyAverageMs = monthlyAvg,
+                                reducedMotion = reducedMotion,
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        "Loading recaps...",
+                        modifier = Modifier.padding(32.dp),
+                        style = TextStyle(
+                            color = LumenTheme.TextSecondary,
+                            fontSize = 13.sp,
+                        ),
+                    )
+                }
+            }
+            else -> TodayScreen(
+                totals = totals,
+                categories = categories,
+                recentDays = recentDays,
+                averageMs = averageMs,
+                selectedDay = selectedDay,
+                dayDetail = dayDetail,
+                onSelectDay = { d ->
+                    if (d == selectedDay) {
+                        selectedDay = null
+                        dayDetail = null
+                    } else {
+                        selectedDay = d
+                        val zone = displayZone()
+                        val rows = decorate(
+                            localDayTotals(zone, d).map { (appKey, ms) ->
+                                AppTotal(
+                                    appKey = appKey,
+                                    displayName = nameResolver.resolve(appKey) ?: appKey.value,
+                                    totalMs = ms,
+                                )
+                            },
+                        )
+                        dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
+                    }
+                },
+                onClearDaySelection = {
                     selectedDay = null
                     dayDetail = null
-                } else {
-                    selectedDay = d
-                    val zone = displayZone()
-                    val rows = decorate(
-                        localDayTotals(zone, d).map { (appKey, ms) ->
-                            AppTotal(
-                                appKey = appKey,
-                                displayName = nameResolver.resolve(appKey) ?: appKey.value,
-                                totalMs = ms,
-                            )
-                        },
-                    )
-                    dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
-                }
-            },
-            onClearDaySelection = {
-                selectedDay = null
-                dayDetail = null
-            },
-            totalMs = storedTotalMs + liveMs,
-            liveApp = liveApp,
-            reducedMotion = reducedMotion,
+                },
+                totalMs = storedTotalMs + liveMs,
+                liveApp = liveApp,
+                reducedMotion = reducedMotion,
             )
         }
     }
