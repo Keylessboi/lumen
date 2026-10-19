@@ -91,6 +91,18 @@ com.sourcetreeapp	Development
 com.figma.Desktop	Development
 figma	Development
 
+# Free editions carry their own bundle id; matching is exact, so the paid
+# id above does not cover them. The free edition is what a hobbyist has.
+com.jetbrains.intellij.ce	Development
+com.jetbrains.pycharm.ce	Development
+org.python.python	Development
+cc.arduino.IDE2	Development
+org.processing.app	Development
+com.openai.codex	Development
+com.electron.dockerdesktop	Development
+com.apple.dt.Instruments	Development
+com.apple.iphonesimulator	Development
+
 # ---- Browsing ----
 com.apple.Safari	Browsing
 com.google.Chrome	Browsing
@@ -140,6 +152,15 @@ org.blender.Blender	Media
 blender	Media
 com.apple.Photos	Media
 
+# Blender was in the registry under the Linux WM class only, so the same
+# app was categorised on one platform and Uncategorized on another.
+org.blenderfoundation.blender	Media
+com.apple.garageband10	Media
+com.apple.iMovieApp	Media
+com.apple.PhotoBooth	Media
+com.apple.VoiceMemos	Media
+com.sony.ImagingEdgeDesktop	Media
+
 # ---- Reading ----
 com.apple.Preview	Reading
 org.pwmt.zathura	Reading
@@ -156,6 +177,9 @@ evince	Reading
 okular	Reading
 com.instapaper.Instapaper	Reading
 com.pocket.Pocket	Reading
+
+com.apple.iBooksX	Reading
+net.cecinestpasparis.yomu	Reading
 
 # ---- Writing ----
 com.apple.Notes	Writing
@@ -176,6 +200,10 @@ com.agiletortoise.Drafts-OSX	Writing
 org.gnome.gedit	Writing
 gedit	Writing
 
+com.apple.TextEdit	Writing
+com.apple.Stickies	Writing
+com.apple.journal	Writing
+
 # ---- Games ----
 com.valvesoftware.steam	Games
 steam	Games
@@ -188,6 +216,13 @@ com.blizzard.WorldOfWarcraft	Games
 org.prismlauncher.PrismLauncher	Games
 heroic	Games
 com.heroicgameslauncher.hgl	Games
+
+com.apple.Chess	Games
+com.apple.games	Games
+com.mojang.minecraftlauncher	Games
+com.roblox.RobloxPlayer	Games
+net.battle.app	Games
+com.StefMorojna.SpaceflightSimulator	Games
 
 # ---- Utilities ----
 com.apple.finder	Utilities
@@ -217,3 +252,21 @@ org.remmina.Remmina	Utilities
 remmina	Utilities
 com.transmissionbt.transmission	Utilities
 transmission-gtk	Utilities
+
+com.apple.Passwords	Utilities
+com.apple.DiskUtility	Utilities
+com.apple.SystemProfiler	Utilities
+com.apple.archiveutility	Utilities
+com.apple.Automator	Utilities
+com.apple.shortcuts	Utilities
+com.apple.FontBook	Utilities
+com.apple.Image_Capture	Utilities
+com.apple.backup.launcher	Utilities
+com.apple.airport.airportutility	Utilities
+com.apple.clock	Utilities
+com.apple.findmy	Utilities
+com.if.Amphetamine	Utilities
+eu.exelban.Stats	Utilities
+# Lumen itself. It counts its own window by decision (docs/HANDOVER.md),
+# so it needs a category like anything else it counts.
+dev.lumen.macos	Utilities
