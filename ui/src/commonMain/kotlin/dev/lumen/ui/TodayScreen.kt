@@ -3,6 +3,7 @@ package dev.lumen.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -79,6 +81,14 @@ fun TodayScreen(
     onOpenSettings: () -> Unit = {},
     onImport: () -> Unit = {},
     onDismissHistory: () -> Unit = {},
+    /**
+     * Space above the TODAY label. 44 dp clears the macOS title bar; inside
+     * the Linux/Android shell the tab strip already sits above, and the full
+     * gap pushed the big number halfway down a phone screen.
+     */
+    topPadding: Dp = 44.dp,
+    /** "This device / All devices" switch; null hides it (no synced devices). */
+    deviceScope: DeviceScope? = null,
 ) {
     // The page does NOT scroll. Scrolling the whole screen made the window
     // content taller than the window, which is worse than the problem it
@@ -88,9 +98,17 @@ fun TodayScreen(
         Modifier
             .fillMaxSize()
             .background(LumenTheme.Background)
-            .padding(start = 32.dp, end = 32.dp, top = 44.dp, bottom = 28.dp)
+            .padding(start = 32.dp, end = 32.dp, top = topPadding, bottom = 28.dp)
     ) {
-        SectionLabel("TODAY")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel(if (deviceScope?.allDevices == true) "TODAY \u00B7 ALL DEVICES" else "TODAY")
+            if (deviceScope != null) {
+                Spacer(Modifier.weight(1f))
+                ScopePill("This device", !deviceScope.allDevices) { deviceScope.onChange(false) }
+                Spacer(Modifier.width(6.dp))
+                ScopePill("All devices", deviceScope.allDevices) { deviceScope.onChange(true) }
+            }
+        }
 
         Spacer(Modifier.height(6.dp))
 
@@ -246,6 +264,22 @@ internal fun visibleRowCount(
 ): Int = (available / pitch).toInt().coerceAtLeast(1)
 
 /** Section heading. One definition so every section matches exactly. */
+/** Whether Today counts only this device, or every synced device too. */
+data class DeviceScope(val allDevices: Boolean, val onChange: (Boolean) -> Unit)
+
+@Composable
+private fun ScopePill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = TextStyle(color = if (selected) LumenTheme.Background else LumenTheme.TextSecondary, fontSize = 12.sp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) LumenTheme.Accent else LumenTheme.Surface)
+            .clickable(role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
 @Composable
 internal fun SectionLabel(text: String) {
     Text(

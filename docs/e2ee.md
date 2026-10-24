@@ -158,6 +158,38 @@ Wire form of `EncryptedPayload`:
 
 **Replay and ordering are NOT solved by the envelope.** A3 can replay or reorder ciphertext freely. Defense lives in the `SyncIntegrity` hash-chain seam (Agent A) plus `(deviceId, seq)` dedupe. The envelope only guarantees a record was authored by the claimed device and not modified.
 
+
+### 6.1 Envelope v2 — OMEMO 2 multi-device (implemented, `Omemo2E2EE`)
+
+v1 had a fatal gap in practice: the apps passed the record's own device id as the recipient, so every device encrypted to **itself** and no other device could ever decrypt what it pulled. The live "two-device E2E" check passed only because its harness gave both devices the same keypair, which the apps never do. v2 replaces the single-recipient path.
+
+Payload encryption is exactly XEP-0384 (v0.8, `urn:xmpp:omemo:2`) §4.4:
+
+1. fresh 32-byte message key `k`;
+2. `HKDF-SHA-256(ikm = k, salt = 32×0x00, info = "OMEMO Payload")` → 80 bytes = AES key (32) ‖ HMAC key (32) ‖ IV (16);
+3. `AES-256-CBC/PKCS#7` over the framed plaintext;
+4. `HMAC-SHA-256(ciphertext)` truncated to 16 bytes;
+5. key material `k ‖ hmac` (48 bytes) wrapped **per recipient device**.
+
+Where OMEMO 2 wraps the key material with a Double Ratchet session, v2 wraps it with `crypto_box` (§6) to each device's long-lived X25519 identity key: `wrappedKeys[deviceId] = nonce(24) ‖ crypto_box(keyMaterial)`. A ratchet needs an ordered two-way conversation; sync records are read later, in any order, by devices that may not exist yet. **No forward secrecy is added, and none is claimed** (§1 still holds).
+
+| Field | v2 value |
+|---|---|
+| `version` | `2` |
+| `senderDeviceId` | bound to the sender's key by `crypto_box`; recipients MUST also check it equals the record's `deviceId` (a server relabelling records fails here) |
+| `nonce` | empty — per-recipient nonces live inside each wrapped key |
+| `ciphertext` | AES-256-CBC output of `length(4, BE) ‖ plaintext ‖ zero padding` to a multiple of 64 bytes |
+| `wrappedKeys` | one entry per recipient, always including the sender |
+| `padding` | informational only (outside the MAC); decrypt uses the authenticated length frame |
+
+v1 envelopes still decrypt. Unknown versions are still a hard failure.
+
+**Device list.** Each device publishes `DeviceBundle {deviceId, identityKey (X25519, base64), label}` to the PEP node `urn:lumen:omemo:2:devices` (item id = device id) — deliberately not `urn:xmpp:omemo:2:devices`, which belongs to the user's chat clients. Pubsub nodes are set to `access_model=whitelist`.
+
+**Trust (`DeviceTrust`): pinned, then approved.** The device list lives on the provider, so a hostile provider can add a device of its own at any time (§8). A newly seen key is therefore pinned only as **pending**: nothing is encrypted to it, nothing it publishes is applied, and no history is re-published for it. The Sync screen shows it with its code and asks the user to compare that with what the device shows for itself before *Approve*. A different key later for a known id is refused and shown; *Forget* (or *Reject*) removes the pin and the bundle, so a genuine device re-announces and comes back as pending. This replaces the advisory TOFU of v1 for the multi-device path.
+
+**New devices.** Approving a device makes this device re-publish its retained history (events are kept ~30 days) encrypted for the new set, so the newcomer can read it. Records older than that, or from a device that is offline, stay unreadable to it; the Argon2id export (§7) remains the path for full history.
+
 ---
 
 ## 7. Export / migrate (M5)

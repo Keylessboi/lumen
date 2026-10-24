@@ -16,8 +16,9 @@ never disagree about a day.
 
 `app-linux/scripts/lumen-applet.sh` is a waybar custom module. Every poll it:
 
-1. sums today's rollups for the current UTC day, excluding the idle key
-   (the lock screen is not screen time), and
+1. sums this device's minute buckets since **local** midnight, excluding the
+   idle key (the lock screen is not screen time) — it used to sum the UTC
+   day, so the bar reset at 8 pm for a UTC-4 user — and
 2. asks `hyprctl activewindow` for the focused app's class — the same value
    the Hyprland collector records, never a window title (`docs/e2ee.md` §3).
 
@@ -60,37 +61,45 @@ A single JSON object per the waybar contract:
 
 ## The systemd service
 
-`app-linux/systemd/lumen-tracker.service` runs `lumen --headless`: the same
-collector → session tracker → SQLite pipeline the window uses, with no
-Compose window. Two users of the same database (service + window) is expected
-and safe — the window reads what the service wrote.
+`app-linux/systemd/lumen-tracker.service` runs the background pipeline —
+focus tracking, sync and scrobbling — with no Compose window.
+
+Only **one** process tracks at a time. The window and the service share the
+device id and the database, and two trackers numbering events from the same
+seq collide on the primary key (one silently loses its events); two
+scrobblers send every song twice. A lock in `~/.local/share/lumen/tracker.lock`
+decides: whoever holds it tracks, syncs and scrobbles. With the service
+running, the window is a viewer — it re-reads the store every 30 s, and
+sign-ins made there are used by the service.
+
+The collector is picked for the session: Hyprland, then Sway, then X11
+(`LinuxCollectors`). Before, both entry points built the Hyprland collector
+unconditionally, which threw on any other desktop.
 
 ### Install
 
-1. Build the packaged app (the service runs the real binary, not Gradle):
+```sh
+./gradlew :app-linux:createDistributable
+app-linux/scripts/install-service.sh
+```
 
-   ```sh
-   ./gradlew :app-linux:createDistributable
-   cp app-linux/scripts/lumen-tracker.sh \
-      app-linux/build/compose/binaries/main/app/lumen/bin/
-   ```
+`install-service.sh` copies the launcher into the app's `bin/`, writes the
+absolute path of your install into the unit (the old unit hardcoded one
+developer's home directory), and enables it. Optional argument: another app
+directory. The launcher prefers the Java runtime bundled with the app.
 
-2. Point the `ExecStart` line at your installed launcher, then install:
+Verify:
 
-   ```sh
-   cp app-linux/systemd/lumen-tracker.service ~/.config/systemd/user/
-   systemctl --user daemon-reload
-   systemctl --user enable --now lumen-tracker.service
-   ```
+```sh
+systemctl --user status lumen-tracker.service
+journalctl --user -u lumen-tracker -f
+```
 
-3. Verify:
-
-   ```sh
-   systemctl --user status lumen-tracker.service
-   journalctl --user -u lumen-tracker -f
-   sqlite3 ~/.local/share/lumen/lumen.db \
-     "SELECT app_key, total_ms FROM rollups WHERE day_utc = date('now');"
-   ```
+The unit is bound to `graphical-session.target`. Compositors must export the
+session environment to systemd at startup (Hyprland:
+`exec-once = dbus-update-activation-environment --systemd --all`), or the
+service cannot see `HYPRLAND_INSTANCE_SIGNATURE`/`SWAYSOCK`/`DISPLAY` or the
+session bus that media players live on.
 
 ### Notes
 
@@ -99,10 +108,9 @@ and safe — the window reads what the service wrote.
   `libapplauncher.so`, which initialises AWT/Skiko and aborts with
   `__cxa_pure_virtual` under a headless unit (no display). The launcher loads
   only the tracking pipeline via `java -cp`.
-- The service is a **user** unit, so it runs inside the graphical session and
-  inherits `HYPRLAND_INSTANCE_SIGNATURE` — the collector's socket path. If the
-  socket is missing, the collector reports `Unsupported` and the service logs
-  it rather than dying silently.
+- The service is a **user** unit inside the graphical session. If no supported
+  session is found, focus tracking reports why in the journal and the service
+  keeps syncing and scrobbling rather than dying.
 - There is deliberately **no `KeepAlive`/auto-restart abuse**: `Restart=on-failure`
   recovers from crashes, but a manual `systemctl --user stop` stays stopped.
 - Closing the window was previously the only way to stop tracking; with the

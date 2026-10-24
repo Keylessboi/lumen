@@ -19,6 +19,8 @@ kotlin {
                 implementation(project(":core"))
                 implementation(project(":ui"))
                 implementation(project(":transport-xmpp"))
+                implementation(project(":scrobble"))
+                implementation(project(":app-common"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
                 implementation(compose.runtime)
@@ -53,10 +55,15 @@ compose.desktop {
             }
             packageName = "lumen"
             packageVersion = "0.1.0"
-            // JvmLumenStore uses JDBC (java.sql.DriverManager) for SQLite.
-            // The jlink runtime image omits it by default, so the app crashes
-            // at startup with NoClassDefFoundError.
-            modules("java.sql")
+            // jlink keeps only the modules listed here, and each missing one is
+            // a crash or a silent failure that only shows in the packaged app:
+            //  - java.sql: JvmLumenStore's JDBC (NoClassDefFoundError at start)
+            //  - jdk.crypto.ec: ECDHE/ECDSA for TLS. Without it the handshake
+            //    with essentially every XMPP and scrobbling server fails.
+            //  - java.naming: Smack/MiniDNS and HTTPS hostname checks
+            //  - java.security.sasl: SASL types Smack's login references
+            //  - jdk.unsupported: sun.misc.Unsafe, used by coroutines/Skiko
+            modules("java.sql", "jdk.crypto.ec", "java.naming", "java.security.sasl", "jdk.unsupported")
         }
     }
 }

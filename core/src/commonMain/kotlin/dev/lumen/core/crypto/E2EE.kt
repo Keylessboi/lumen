@@ -109,3 +109,26 @@ data class KeyPairRef(
      */
     val privateKeyHandle: ByteArray,
 )
+
+/**
+ * The multi-device half of the seam — the OMEMO 2 shape (XEP-0384 §4.4):
+ * the payload is encrypted ONCE under a fresh message key, and that key is
+ * wrapped separately for every device that should read it.
+ *
+ * This is what makes sync work across more than one device. The v1 path
+ * encrypted each record to a single recipient, and the apps passed the
+ * sender's own id as that recipient — so a record was only ever readable by
+ * the device that wrote it, and a second device could never decrypt
+ * anything it pulled.
+ */
+interface MultiDeviceE2EE : E2EE {
+
+    /**
+     * Encrypt [plaintext] so that every device in [recipients] — and the
+     * sender itself, always — can decrypt it.
+     */
+    fun encryptForDevices(plaintext: ByteArray, recipients: Set<DeviceId>): EncryptedPayload
+}
+
+/** Thrown when a payload carries no wrapped key for this device. */
+class NotAddressedToThisDevice(message: String) : IllegalStateException(message)

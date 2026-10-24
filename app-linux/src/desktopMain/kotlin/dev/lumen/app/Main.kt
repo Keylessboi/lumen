@@ -1,62 +1,55 @@
 package dev.lumen.app
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import kotlinx.coroutines.launch
-import dev.lumen.app.collector.HyprlandCollector
+import dev.lumen.app.collector.LinuxCollectors
 import dev.lumen.app.names.DesktopEntryNameResolver
+import dev.lumen.core.category.DayView
+import dev.lumen.core.category.sessionCategoryEngine
 import dev.lumen.core.clock.LocalDay
-import dev.lumen.core.clock.UtcDay
-import kotlinx.datetime.TimeZone
 import dev.lumen.core.collector.AppNameResolver
+import dev.lumen.core.collector.PermissionState
 import dev.lumen.core.model.AppKey
 import dev.lumen.core.model.AppTotal
 import dev.lumen.core.model.DeviceId
-import dev.lumen.core.model.FocusEvent
-import dev.lumen.core.model.Setting
-import dev.lumen.core.rollup.RollupEngine
-import dev.lumen.core.category.DayView
-import dev.lumen.core.category.sessionCategoryEngine
 import dev.lumen.core.session.DayAccumulator
 import dev.lumen.core.session.FocusSessionTracker
-import dev.lumen.core.store.JvmLumenStore
-import dev.lumen.transport.XmppTransport
-import dev.lumen.transport.providers.Providers
-import dev.lumen.ui.AccountProviderOption
 import dev.lumen.ui.AccountSection
-import dev.lumen.ui.AccountUiState
-import dev.lumen.ui.LumenTheme
+import dev.lumen.ui.DeviceScope
+import dev.lumen.ui.HistoryState
+import dev.lumen.ui.LumenAppShell
+import dev.lumen.ui.ScrobbleSection
+import dev.lumen.ui.SettingsPage
+import dev.lumen.ui.ShellTab
 import dev.lumen.ui.TodayScreen
 import dev.lumen.ui.charts.CategorySlice
 import dev.lumen.ui.charts.DayDetail
 import dev.lumen.ui.charts.DayTotal
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import java.io.File
+import kotlinx.datetime.TimeZone
 
 /**
  * Lumen for Linux.
  *
- * Uses the SHARED `:ui` TodayScreen and persists through [JvmLumenStore]
- * (SQLite). The collector seam reports focus transitions; [FocusSessionTracker]
- * derives durations; [RollupEngine] buckets and rolls them up; the store
- * survives restarts.
+ * The SHARED `:ui` screens inside [LumenAppShell] — Today, Sync, Scrobbling —
+ * over the SQLite store. The collector is picked for the running session
+ * (Hyprland, Sway or X11 — [LinuxCollectors]); [FocusSessionTracker] derives
+ * durations; RollupEngine buckets and rolls them up.
+ *
+ * If the background service (`lumen-tracker.service`) is already running,
+ * IT tracks, syncs and scrobbles, and this window shows what it records —
+ * see [LinuxRuntime.tryBecomeTracker].
  */
 fun main(args: Array<String>) = runApp()
 
@@ -64,12 +57,23 @@ private fun runApp() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Lumen",
-        state = rememberWindowState(size = DpSize(880.dp, 680.dp)),
+        state = rememberWindowState(size = DpSize(880.dp, 720.dp)),
     ) {
-        val collector = remember { HyprlandCollector() }
+        // Whoever holds the tracker lock records focus; if the service holds
+        // it, this window is a viewer of the same database.
+        val isTracker = remember { LinuxRuntime.tryBecomeTracker() != null }
+        val collector = remember { LinuxCollectors.detect() }
+        val permission = remember { collector.permissionState() }
         val nameResolver: AppNameResolver = remember { DesktopEntryNameResolver() }
-        val store = remember { openStore() }
-        val deviceId = remember { resolveDeviceId(store) }
+        val store = remember { LinuxRuntime.openStore() }
+        val deviceId = remember { LinuxRuntime.resolveDeviceId(store) }
+        val services = remember {
+            LinuxRuntime.services(store, deviceId).also {
+                it.sync.passive = !isTracker
+                it.scrobble.passive = !isTracker
+            }
+        }
+        DisposableEffect(Unit) { onDispose { services.scope.coroutineContext[Job]?.cancel() } }
         // Seed the seq counter from the store: FocusSessionTracker numbers
         // from 0 on every launch, and the (device_id, seq) PK drops colliding
         // inserts silently (INSERT OR IGNORE). Without this a restart makes
@@ -77,6 +81,9 @@ private fun runApp() = application {
         val tracker = remember { FocusSessionTracker(deviceId, store.lastEventSeq(deviceId) + 1) }
         val day = remember { DayAccumulator() }
 
+        var tab by remember { mutableStateOf("today") }
+        var allDevices by remember { mutableStateOf(false) }
+        var dataVersion by remember { mutableStateOf(0) }
         var totals by remember { mutableStateOf(emptyList<AppTotal>()) }
         var storedTotalMs by remember { mutableStateOf(0L) }
         var storedTotals by remember { mutableStateOf(emptyList<AppTotal>()) }
@@ -115,10 +122,14 @@ private fun runApp() = application {
             return LocalDay.zoneOf(stored)
         }
 
+        /** This device, or this device plus every synced device that has delivered data. */
+        fun devicesInScope(): List<DeviceId> =
+            if (allDevices) listOf(deviceId) + services.sync.peerDevices() else listOf(deviceId)
+
         fun localDayTotals(zone: TimeZone, dayLocal: String): List<Pair<AppKey, Long>> {
             val dayStart = LocalDay.startOfDayMs(dayLocal, zone)
             val dayEnd = LocalDay.endOfDayMs(dayLocal, zone)
-            return store.bucketsForRange(deviceId, dayStart, dayEnd)
+            return devicesInScope().flatMap { store.bucketsForRange(it, dayStart, dayEnd) }
                 .filter { it.appKey.value.isNotBlank() }
                 .groupBy { it.appKey }
                 .map { (app, buckets) -> app to buckets.sumOf { it.activeMs } }
@@ -213,10 +224,21 @@ private fun runApp() = application {
         LaunchedEffect(Unit) {
             render()
             loadHistory()
+            services.sync.onRemoteData = { dataVersion++ }
+            if (!isTracker) {
+                // The service is recording; keep re-reading what it writes.
+                while (true) {
+                    delay(VIEWER_REFRESH_MS)
+                    dataVersion++
+                }
+            }
+            services.sync.startLoop()
+            services.scrobble.attach(services.media.playback())
+            if (permission !is PermissionState.Granted) return@LaunchedEffect
             collector.focusChanges().collect { change ->
                 day.remember(change)
                 tracker.onChange(change)?.let { closed ->
-                    persistEvent(store, closed)
+                    LinuxRuntime.persistEvent(store, closed)
                     day.add(closed)
                     render()
                 }
@@ -226,23 +248,11 @@ private fun runApp() = application {
             }
         }
 
-        // Periodic sync (M4): same loop as the headless tracker, so the
-        // windowed app also pushes/pulls when an account is configured.
-        // 'Sync additive, never a dependency' — unconfigured = no loop.
-        LaunchedEffect(Unit) {
-            val syncManager = SyncManager(store, deviceId)
-            while (true) {
-                delay(SYNC_INTERVAL_MS)
-                if (!syncManager.isConfigured()) continue
-                runCatching {
-                    val report = syncManager.syncOnce()
-                    if (report.integrityWarnings.isNotEmpty()) {
-                        println("lumen: sync integrity warnings: ${report.integrityWarnings}")
-                    }
-                }.onFailure { e ->
-                    println("lumen: sync failed: ${e.message}")
-                }
-            }
+        // Synced data arrived, the viewer refreshed, or the scope switched.
+        LaunchedEffect(dataVersion, allDevices) {
+            if (dataVersion == 0 && !allDevices) return@LaunchedEffect
+            render()
+            loadHistory()
         }
 
         LaunchedEffect(Unit) {
@@ -277,160 +287,101 @@ private fun runApp() = application {
             (now - liveSinceMs).coerceAtLeast(0) else 0
 
         val reducedMotion = remember { reducedMotionEnabled() }
+        val accountState by services.sync.state.collectAsState()
+        val scrobbleState by services.scrobble.state.collectAsState()
+        val hasPeers = remember(dataVersion, accountState) { services.sync.peerDevices().isNotEmpty() }
 
-        // ---- account / sync surface (M4) ----
-        val syncManager = remember { SyncManager(store, deviceId) }
-        var accountState by remember {
-            mutableStateOf<AccountUiState>(
-                if (syncManager.isConfigured()) {
-                    val cfg = syncManager.account()
-                    AccountUiState.Connected(cfg?.jid ?: "", cfg?.host ?: "")
-                } else {
-                    AccountUiState.Unconfigured
-                },
-            )
-        }
-        var showAccount by remember { mutableStateOf(false) }
-
-        val providerOptions = remember {
-            Providers.all.map { AccountProviderOption(jid = it.jid, tier = it.tier) }
-        }
-        val accountScope = rememberCoroutineScope()
-
-        fun configure(providerJid: String, username: String, password: String) {
-            accountState = AccountUiState.Working("Connecting to $providerJid\u2026")
-            val parts = providerJid.split("@")
-            val host = parts.lastOrNull() ?: providerJid
-            syncManager.saveAccount(
-                AccountConfig(
-                    host = host,
-                    port = 5222,
-                    jid = "$username@$host",
-                    password = password,
-                ),
-            )
-            accountState = AccountUiState.Connected("$username@$host", host)
-        }
-
-        fun register(providerJid: String, username: String, password: String) {
-            accountState = AccountUiState.Working("Creating account on $providerJid\u2026")
-            val parts = providerJid.split("@")
-            val host = parts.lastOrNull() ?: providerJid
-            val jid = "$username@$host"
-            accountScope.launch {
-                runCatching {
-                    val xmpp = XmppTransport(host = host, port = 5222, jid = jid, password = password)
-                    xmpp.register(username, password)
-                }.onSuccess {
-                    configure(providerJid, username, password)
-                }.onFailure { e ->
-                    accountState = AccountUiState.Failed("Registration failed: ${e.message ?: e::class.simpleName}")
+        LumenAppShell(
+            tabs = listOf(ShellTab("today", "Today"), ShellTab("sync", "Sync"), ShellTab("scrobble", "Scrobbling")),
+            selectedId = tab,
+            onSelect = { tab = it },
+        ) {
+            when (tab) {
+                "sync" -> SettingsPage {
+                    AccountSection(
+                        providers = services.sync.providers,
+                        state = accountState,
+                        onRegister = services.sync::register,
+                        onSave = services.sync::signIn,
+                        onDisconnect = services.sync::disconnect,
+                        onAnswerChallenge = services.sync::answerChallenge,
+                        onCancel = services.sync::cancelSignUp,
+                        onSyncNow = services.sync::syncNow,
+                        onForgetDevice = services.sync::forgetDevice,
+                        onApproveDevice = services.sync::approveDevice,
+                        onOpenUrl = LinuxRuntime::openUrl,
+                    )
                 }
-            }
-        }
-
-        Row {
-            listOf("Today", "Sync").forEach { label ->
-                val selected = (label == "Sync") == showAccount
-                Text(
-                    label,
-                    style = TextStyle(
-                        color = if (selected) LumenTheme.TextPrimary else LumenTheme.TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                        .clickable { showAccount = label == "Sync" },
-                )
-            }
-        }
-
-        if (showAccount) {
-            AccountSection(
-                providers = providerOptions,
-                state = accountState,
-                onRegister = ::register,
-                onSave = ::configure,
-                onDisconnect = {
-                    syncManager.clearAccount()
-                    accountState = AccountUiState.Unconfigured
-                },
-            )
-        } else {
-            TodayScreen(
-            totals = totals,
-            categories = categories,
-            recentDays = recentDays,
-            averageMs = averageMs,
-            selectedDay = selectedDay,
-            dayDetail = dayDetail,
-            onSelectDay = { d ->
-                if (d == selectedDay) {
-                    selectedDay = null
-                    dayDetail = null
-                } else {
-                    selectedDay = d
-                    val zone = displayZone()
-                    val rows = decorate(
-                        localDayTotals(zone, d).map { (appKey, ms) ->
-                            AppTotal(
-                                appKey = appKey,
-                                displayName = nameResolver.resolve(appKey) ?: appKey.value,
-                                totalMs = ms,
+                "scrobble" -> SettingsPage {
+                    ScrobbleSection(
+                        state = if (isTracker) {
+                            scrobbleState
+                        } else {
+                            scrobbleState.copy(
+                                sourceStatus = "The Lumen background service is running and does the scrobbling. " +
+                                    "Sign-ins made here apply to it.",
                             )
                         },
+                        onSignIn = services.scrobble::signIn,
+                        onCancelSignIn = services.scrobble::cancelSignIn,
+                        onSubmitToken = services.scrobble::submitToken,
+                        onSignOut = services.scrobble::signOut,
+                        onOpenUrl = LinuxRuntime::openUrl,
+                        onSourceAction = {},
+                        onIncludeBrowsers = services.scrobble::setIncludeBrowsers,
+                        onSendNow = services.scrobble::sendNow,
                     )
-                    dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
                 }
-            },
-            onClearDaySelection = {
-                selectedDay = null
-                dayDetail = null
-            },
-            totalMs = storedTotalMs + liveMs,
-            liveApp = liveApp,
-            reducedMotion = reducedMotion,
-            )
+                else -> TodayScreen(
+                    totals = totals,
+                    categories = categories,
+                    recentDays = recentDays,
+                    averageMs = averageMs,
+                    selectedDay = selectedDay,
+                    dayDetail = dayDetail,
+                    onSelectDay = { d ->
+                        if (d == selectedDay) {
+                            selectedDay = null
+                            dayDetail = null
+                        } else {
+                            selectedDay = d
+                            val zone = displayZone()
+                            val rows = decorate(
+                                localDayTotals(zone, d).map { (appKey, ms) ->
+                                    AppTotal(
+                                        appKey = appKey,
+                                        displayName = nameResolver.resolve(appKey) ?: appKey.value,
+                                        totalMs = ms,
+                                    )
+                                },
+                            )
+                            dayDetail = DayDetail(dayUtc = d, totalMs = rows.sumOf { it.totalMs }, totals = rows)
+                        }
+                    },
+                    onClearDaySelection = {
+                        selectedDay = null
+                        dayDetail = null
+                    },
+                    totalMs = storedTotalMs + liveMs,
+                    liveApp = liveApp,
+                    reducedMotion = reducedMotion,
+                    topPadding = 20.dp,
+                    historyState = when {
+                        !isTracker -> HistoryState.Hidden
+                        permission is PermissionState.Unsupported -> HistoryState.Message(permission.reason)
+                        permission is PermissionState.Required ->
+                            HistoryState.Message("${permission.rationale} ${permission.settingsHint}")
+                        else -> HistoryState.Hidden
+                    },
+                    deviceScope = if (hasPeers) DeviceScope(allDevices) { allDevices = it } else null,
+                )
+            }
         }
     }
 }
 
-private const val SYNC_INTERVAL_MS = 5L * 60 * 1000 // every 5 minutes, matching the headless tracker
-
-private fun openStore(): JvmLumenStore {
-    val dataDir = File(System.getProperty("user.home"), ".local/share/lumen")
-    return JvmLumenStore.open(File(dataDir, "lumen.db"))}
-
-private fun resolveDeviceId(store: JvmLumenStore): DeviceId {
-    val existing = store.setting("device_id")
-    if (existing != null) return DeviceId(String(existing.value, Charsets.UTF_8))
-    val id = DeviceId()
-    store.upsertSetting(
-        Setting(
-            key = "device_id",
-            value = id.value.toByteArray(Charsets.UTF_8),
-            updatedAtMs = System.currentTimeMillis(),
-            updatedDayUtc = UtcDay.today(),
-            deviceId = id,
-        ),
-    )
-    // A fresh device has nothing acked — the watermark must be -1, not the
-    // store's 0 default, or the first event (seq 0) is excluded from the
-    // outbox by `eventsAfter(seq > watermark)` and never syncs.
-    store.setAckedSeq(id, -1)
-    return id
-}
-
-private fun persistEvent(store: JvmLumenStore, event: FocusEvent) {
-    store.insertEvent(event)
-    RollupEngine.bucket(event).forEach(store::insertBucket)
-    val today = UtcDay.dayOf(event.startedAtMs)
-    val dayStart = UtcDay.boundary(today)
-    val dayEnd = dayStart + 86_400_000
-    val buckets = store.bucketsForRange(event.deviceId, dayStart, dayEnd)
-    RollupEngine.rollup(event.deviceId, today, buckets).forEach(store::upsertRollup)
-}
+/** How often a viewer window (the service is tracking) re-reads the store. */
+private const val VIEWER_REFRESH_MS = 30_000L
 
 /**
  * Whether the desktop asks for reduced motion.

@@ -93,6 +93,18 @@ interface LumenStore {
 
     fun setAckedSeq(deviceId: DeviceId, seq: Long)
 
+    /**
+     * Highest event seq this store holds for [deviceId], or -1 when none.
+     *
+     * Additive, with a default, so no driver has to change: every tracker
+     * must seed its seq counter from here. Android did not — it numbered from
+     * 0 on every launch, so each launch's events collided with the previous
+     * launch's on the `(device_id, seq)` PK and were dropped by
+     * `INSERT OR IGNORE`.
+     */
+    fun lastEventSeq(deviceId: DeviceId): Long =
+        eventsAfter(deviceId, Long.MIN_VALUE).maxOfOrNull { it.seq } ?: -1L
+
     // ---- control-state takeover (docs/data-model.md) ----
 
     /**

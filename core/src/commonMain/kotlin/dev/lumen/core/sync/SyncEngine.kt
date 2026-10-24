@@ -1,8 +1,11 @@
 package dev.lumen.core.sync
 
 import dev.lumen.core.model.AppKey
+import dev.lumen.core.clock.UtcDay
 import dev.lumen.core.model.DeviceId
+import dev.lumen.core.model.FocusEvent
 import dev.lumen.core.model.RecordKind
+import dev.lumen.core.model.Setting
 import dev.lumen.core.model.SyncRecord
 import dev.lumen.core.model.SyncState
 import dev.lumen.core.store.LumenStore
@@ -46,13 +49,16 @@ class SyncEngine(
      */
     suspend fun sync(): SyncReport {
         warnings.clear()
+        remoteEvents.clear()
         val pulled = pull()
         val published = push()
+        (transport as? SyncDiagnostics)?.let { warnings += it.drainWarnings() }
         return SyncReport(
             pulled = pulled.size,
             applied = pulled.size, // every dedupe-passing record applies
             published = published,
             integrityWarnings = warnings.toList(),
+            remoteEvents = remoteEvents.toList(),
         )
     }
 
@@ -63,7 +69,11 @@ class SyncEngine(
      * Pull records newer than each device's local watermark, dedupe by
      * `(deviceId, seq)`, verify integrity, and apply to the store.
      */
-    suspend fun pull(): List<SyncRecord> = applyRemote(transport.pull(watermarks()))
+    suspend fun pull(): List<SyncRecord> {
+        val records = transport.pull(watermarks())
+        val skipped = (transport as? SyncDiagnostics)?.drainSkipped().orEmpty()
+        return applyRemote(records, skipped)
+    }
     /**
      * Publish the local outbox — records the store has that the server
      * has not acked. Advances the watermark on ack.
@@ -80,8 +90,23 @@ class SyncEngine(
     }
 
     private val warnings = mutableListOf<String>()
+    private val remoteEvents = mutableListOf<FocusEvent>()
 
-    private suspend fun applyRemote(records: List<SyncRecord>): List<SyncRecord> {
+    private fun applyRemote(
+        pulledRecords: List<SyncRecord>,
+        knownSkips: Set<Pair<String, Long>> = emptySet(),
+    ): List<SyncRecord> {
+        // Our own records come back from the node too (it is one shared node
+        // per account). This device is their source of truth — applying them
+        // again is at best redundant, and a stale copy must never win.
+        //
+        // Within one device, order by seq. Pubsub servers do not promise item
+        // order (several return newest first), and a descending batch read
+        // as "server order" made every record after the first look like a
+        // replay — dropped, while the watermark had already jumped to the top.
+        val records = pulledRecords
+            .filter { it.deviceId != localDeviceId }
+            .sortedWith(compareBy<SyncRecord>({ it.deviceId.value }, { it.seq }))
         // Dedupe by (deviceId, seq): the transport may legitimately replay
         // items it already delivered (pubsub at-least-once). INSERT OR
         // IGNORE on the events PK does the final dedupe; the in-memory set
@@ -116,9 +141,19 @@ class SyncEngine(
                 continue
             }
             if (prev >= 0 && record.seq > prev + 1) {
-                warnings += "gap: ${record.deviceId.value} jumped ${prev} -> ${record.seq}"
+                val explained = (prev + 1 until record.seq).all { (record.deviceId.value to it) in knownSkips }
+                if (!explained) warnings += "gap: ${record.deviceId.value} jumped ${prev} -> ${record.seq}"
             }
             lastSeenSeq[record.deviceId.value] = record.seq
+
+            // The record's (device, seq) is outside the ciphertext; the event's
+            // own copy is inside it. A server swapping two valid envelopes of
+            // the same device would otherwise advance the watermark past an
+            // event that was never applied.
+            if (!payloadMatches(record)) {
+                warnings += "integrity: ${record.deviceId.value} seq ${record.seq} carries another record's payload"
+                continue
+            }
 
             if (integrity != null && !integrity.verify(record, prev)) {
                 warnings += "integrity: ${record.deviceId.value} seq ${record.seq} failed chain"
@@ -131,21 +166,65 @@ class SyncEngine(
             store.setAckedSeq(record.deviceId, record.seq)
             applied += record
         }
+        rememberPeers(applied.map { it.deviceId.value }.toSet())
         return applied
+    }
+
+    private fun payloadMatches(record: SyncRecord): Boolean {
+        if (record.kind != RecordKind.EVENT) return true
+        val event = runCatching { record.toFocusEvent() }.getOrNull() ?: return false
+        return event.seq == record.seq && event.deviceId == record.deviceId
     }
 
     /** Apply one verified record per its kind. */
     private fun apply(record: SyncRecord) {
         when (record.kind) {
-            RecordKind.EVENT -> store.insertEvent(record.toFocusEvent())
+            RecordKind.EVENT -> record.toFocusEvent().also {
+                store.insertEvent(it)
+                remoteEvents += it
+            }
             RecordKind.ROLLUP -> store.upsertRollup(record.toAppDayRollup())
             RecordKind.SETTING -> store.upsertSetting(record.toSetting())
         }
     }
 
+    /**
+     * Every device's watermark, not just ours. Passing only the local one
+     * meant the transport returned each peer's ENTIRE history on every pass,
+     * and the engine then flagged all of it as "replay" — a warning storm
+     * that buried any real one.
+     */
     private fun watermarks(): Map<String, Long> =
-        mapOf(localDeviceId.value to store.lastAckedSeq(localDeviceId))
+        (peers() + localDeviceId.value).associateWith { store.lastAckedSeq(DeviceId(it)) }
+
+    /** Device ids this store has applied records from. */
+    fun peers(): Set<String> =
+        store.setting(PEERS_KEY)?.value?.decodeToString()
+            ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+            .orEmpty()
+
+    private fun rememberPeers(ids: Set<String>) {
+        val known = peers()
+        if (known.containsAll(ids)) return
+        val now = currentTimeMs()
+        store.upsertSetting(
+            Setting(
+                key = PEERS_KEY,
+                value = (known + ids).sorted().joinToString(",").encodeToByteArray(),
+                updatedAtMs = now,
+                updatedDayUtc = UtcDay.dayOf(now),
+                deviceId = localDeviceId,
+            ),
+        )
+    }
+
+    companion object {
+        /** Local bookkeeping: which peer devices have delivered records. */
+        const val PEERS_KEY = "sync.peers"
+    }
 }
+
+private fun currentTimeMs(): Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
 
 /** What one [SyncEngine.sync] pass did. */
 data class SyncReport(
@@ -153,6 +232,13 @@ data class SyncReport(
     val applied: Int,
     val published: Int,
     val integrityWarnings: List<String>,
+    /**
+     * Events applied from OTHER devices this pass. Buckets and rollups are
+     * derived per device and never synced, so the caller derives them from
+     * these — without that, pulled time sat in the events table and no
+     * screen ever showed it.
+     */
+    val remoteEvents: List<FocusEvent> = emptyList(),
 )
 
 /**

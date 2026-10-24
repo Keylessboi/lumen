@@ -1,30 +1,33 @@
 [Unit]
-# Lumen headless tracker — records screen time without the window.
-# The window app and this service share the same SQLite store, so running
-# both at once is fine: closing the window hides the report, the service
-# keeps measuring.
+# Lumen headless tracker — records screen time, syncs and scrobbles without
+# the window. The window app and this service share the same SQLite store.
+# Only one of them tracks at a time (a lock in ~/.local/share/lumen): while
+# this service runs, the window just shows what it records.
 #
 # Uses the plain-JVM launcher (bin/lumen-tracker.sh), NOT the Compose
 # binary: the Compose launcher initialises AWT/Skiko and aborts under a
 # headless unit with __cxa_pure_virtual.
 #
-# Install:
-#   cp lumen-tracker.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now lumen-tracker.service
-#
-# Adjust the ExecStart path to your install location.
+# Install with app-linux/scripts/install-service.sh, which writes the
+# absolute path of YOUR install into ExecStart (systemd does not expand
+# relative paths, and the old hardcoded /home/travis/... path only worked on
+# one machine).
+
+Description=Lumen screen-time tracker
+PartOf=graphical-session.target
+After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/home/travis/Projects/lumen/app-linux/build/compose/binaries/main/app/lumen/bin/lumen-tracker.sh
+ExecStart=@LUMEN_TRACKER@
 Restart=on-failure
 RestartSec=5
 
-# The tracker needs the Hyprland session environment (the compositor socket
-# path). A user service inherits the graphical session env when started via
-# systemctl --user; if the socket is missing, the collector reports
-# Unsupported and the service logs it.
+# The tracker needs the graphical session environment (HYPRLAND_INSTANCE_SIGNATURE,
+# SWAYSOCK or DISPLAY, plus DBUS_SESSION_BUS_ADDRESS for media players).
+# Bound to graphical-session.target so it starts once those exist; compositors
+# should run `systemctl --user import-environment` (or
+# `dbus-update-activation-environment --systemd --all`) at startup.
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
