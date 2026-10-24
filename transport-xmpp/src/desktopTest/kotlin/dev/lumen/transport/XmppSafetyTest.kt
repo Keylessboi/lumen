@@ -21,6 +21,17 @@ class XmppSafetyTest {
     }
 
     @Test
+    fun `server-supplied captcha URLs are only fetched when safe`() {
+        assertEquals(null, safeCaptchaUrl("http://example.org/c.png", "example.org"), "plain http")
+        assertEquals(null, safeCaptchaUrl("https://evil.example/c.png", "example.org"), "another host")
+        assertEquals(null, safeCaptchaUrl("https://localhost/c.png", "localhost"), "loopback")
+        assertEquals(null, safeCaptchaUrl("https://127.0.0.1/c.png", "127.0.0.1"), "loopback literal")
+        assertEquals(null, safeCaptchaUrl("https://192.168.1.1/c.png", "192.168.1.1"), "private network")
+        assertEquals(null, safeCaptchaUrl("https://user@example.org/c.png", "example.org"), "credentials in URL")
+        assertEquals(null, safeCaptchaUrl("file:///etc/passwd", "example.org"), "other scheme")
+    }
+
+    @Test
     fun `a wrong password reads as a wrong password`() {
         val e = RuntimeException("login", SASLErrorException("SCRAM-SHA-1", org.jivesoftware.smack.sasl.packet.SaslNonza.SASLFailure("not-authorized")))
         assertEquals(XmppUserError.Kind.BAD_CREDENTIALS, e.toUserError().kind)

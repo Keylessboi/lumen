@@ -308,6 +308,7 @@ private fun runApp() = application {
                         onCancel = services.sync::cancelSignUp,
                         onSyncNow = services.sync::syncNow,
                         onForgetDevice = services.sync::forgetDevice,
+                        onApproveDevice = services.sync::approveDevice,
                         onOpenUrl = LinuxRuntime::openUrl,
                     )
                 }

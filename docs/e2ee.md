@@ -186,9 +186,9 @@ v1 envelopes still decrypt. Unknown versions are still a hard failure.
 
 **Device list.** Each device publishes `DeviceBundle {deviceId, identityKey (X25519, base64), label}` to the PEP node `urn:lumen:omemo:2:devices` (item id = device id) — deliberately not `urn:xmpp:omemo:2:devices`, which belongs to the user's chat clients. Pubsub nodes are set to `access_model=whitelist`.
 
-**Trust (TOFU, `DeviceTrust`).** The first key a device id presents is pinned locally. A different key later is refused and shown on the Sync screen; the user resolves it with *Forget*, which also removes the bundle so a genuine device re-announces and is re-pinned. Fingerprints are shown per device for out-of-band comparison (§5.5).
+**Trust (`DeviceTrust`): pinned, then approved.** The device list lives on the provider, so a hostile provider can add a device of its own at any time (§8). A newly seen key is therefore pinned only as **pending**: nothing is encrypted to it, nothing it publishes is applied, and no history is re-published for it. The Sync screen shows it with its code and asks the user to compare that with what the device shows for itself before *Approve*. A different key later for a known id is refused and shown; *Forget* (or *Reject*) removes the pin and the bundle, so a genuine device re-announces and comes back as pending. This replaces the advisory TOFU of v1 for the multi-device path.
 
-**New devices.** When a device is pinned for the first time, each existing device re-publishes its retained history (events are kept ~30 days) encrypted for the new set. Records older than that, or from a device that is offline, stay unreadable to the newcomer; the Argon2id export (§7) remains the path for full history.
+**New devices.** Approving a device makes this device re-publish its retained history (events are kept ~30 days) encrypted for the new set, so the newcomer can read it. Records older than that, or from a device that is offline, stay unreadable to it; the Argon2id export (§7) remains the path for full history.
 
 ---
 

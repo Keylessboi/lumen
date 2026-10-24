@@ -75,6 +75,8 @@ data class DeviceRow(
     val label: String,
     val fingerprint: String,
     val thisDevice: Boolean,
+    /** Seen on the account but not approved here yet. */
+    val pending: Boolean = false,
 )
 
 /** What the account surface is doing right now. */
@@ -117,10 +119,11 @@ fun AccountSection(
     onSyncNow: () -> Unit = {},
     onForgetDevice: (deviceId: String) -> Unit = {},
     onOpenUrl: (String) -> Unit = {},
+    onApproveDevice: (deviceId: String) -> Unit = {},
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         when (state) {
-            is AccountUiState.Connected -> ConnectedView(state, onSyncNow, onForgetDevice, onDisconnect)
+            is AccountUiState.Connected -> ConnectedView(state, onSyncNow, onApproveDevice, onForgetDevice, onDisconnect)
             is AccountUiState.Challenge -> ChallengeView(state, onAnswerChallenge, onCancel, onOpenUrl)
             else -> AccountForm(providers, state, onRegister, onSave)
         }
@@ -323,10 +326,38 @@ private fun ChallengeView(
 private fun ConnectedView(
     state: AccountUiState.Connected,
     onSyncNow: () -> Unit,
+    onApproveDevice: (String) -> Unit,
     onForgetDevice: (String) -> Unit,
     onDisconnect: () -> Unit,
 ) {
     PageTitle("Sync is on", "Usage syncs between your devices, encrypted end to end.")
+
+    val pending = state.devices.filter { it.pending }
+    if (pending.isNotEmpty()) {
+        SettingsCard {
+            CardTitle(if (pending.size == 1) "A new device wants to sync" else "New devices want to sync")
+            BodyText(
+                "Open Lumen on that device and check that it shows exactly this code for itself. " +
+                    "Only approve it if the codes match — the server could have added a device of its own.",
+                secondary = true,
+            )
+            pending.forEach { device ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(device.label, style = TextStyle(color = LumenTheme.TextPrimary, fontSize = 14.sp))
+                    SelectionContainer {
+                        Text(
+                            device.fingerprint,
+                            style = TextStyle(color = LumenTheme.TextPrimary, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        PrimaryButton("Codes match \u2014 approve", { onApproveDevice(device.id) })
+                        QuietButton("Reject", { onForgetDevice(device.id) }, danger = true)
+                    }
+                }
+            }
+        }
+    }
     SettingsCard {
         InfoLine("Account", "${state.username} on ${state.host}")
         InfoLine("Last sync", if (state.syncing) "Syncing…" else state.lastSync ?: "Not yet")
@@ -343,8 +374,8 @@ private fun ConnectedView(
                 "before trusting it — a server that slipped in a device of its own would show up here.",
             secondary = true,
         )
-        if (state.devices.isEmpty()) BodyText("Only this device so far.", secondary = true)
-        state.devices.forEach { device ->
+        if (state.devices.none { !it.thisDevice && !it.pending }) BodyText("No other devices approved yet.", secondary = true)
+        state.devices.filterNot { it.pending }.forEach { device ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(

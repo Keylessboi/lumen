@@ -28,7 +28,19 @@ object LinuxRuntime {
 
     val dataDir: File = File(System.getenv("XDG_DATA_HOME")?.let(::File) ?: File(System.getProperty("user.home"), ".local/share"), "lumen")
 
-    fun openStore(): JvmLumenStore = JvmLumenStore.open(File(dataDir, "lumen.db"))
+    fun openStore(): JvmLumenStore {
+        ensureDataDir()
+        return JvmLumenStore.open(File(dataDir, "lumen.db"))
+    }
+
+    /** Owner-only: the directory holds usage history and possibly secrets. */
+    private fun ensureDataDir() {
+        val ownerOnly = java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")
+        if (!dataDir.exists()) {
+            java.nio.file.Files.createDirectories(dataDir.toPath(), java.nio.file.attribute.PosixFilePermissions.asFileAttribute(ownerOnly))
+        }
+        runCatching { java.nio.file.Files.setPosixFilePermissions(dataDir.toPath(), ownerOnly) }
+    }
 
     /** The stable device id from the settings table, created on first run. */
     fun resolveDeviceId(store: JvmLumenStore): DeviceId {
@@ -75,7 +87,7 @@ object LinuxRuntime {
      * Whoever holds this lock tracks; the other only reads.
      */
     fun tryBecomeTracker(): FileLock? = heldLock ?: runCatching {
-        dataDir.mkdirs()
+        ensureDataDir()
         val channel = RandomAccessFile(File(dataDir, "tracker.lock"), "rw").channel
         channel.tryLock() ?: run {
             channel.close()
@@ -89,6 +101,7 @@ object LinuxRuntime {
 
     /** Open a link in the user's browser. */
     fun openUrl(url: String) {
+        if (!dev.lumen.app.common.isSafeWebLink(url)) return
         val opened = runCatching { ProcessBuilder("xdg-open", url).start(); true }.getOrDefault(false)
         if (!opened) {
             runCatching {

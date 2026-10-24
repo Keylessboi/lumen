@@ -123,18 +123,34 @@ class LinuxSecretStore(
         if (props.remove(name) != null) writeFallback(props)
     }
 
+    /**
+     * Written 0600 inside a 0700 directory, or not at all: there is no
+     * fallback to default permissions, which would leave the secrets
+     * world-readable under a typical 022 umask.
+     */
     private fun writeFallback(props: Properties) {
-        dataDir.mkdirs()
+        val ownerOnlyDir = PosixFilePermissions.fromString("rwx------")
+        val ownerOnlyFile = PosixFilePermissions.fromString("rw-------")
+        if (!dataDir.exists()) {
+            Files.createDirectories(dataDir.toPath(), PosixFilePermissions.asFileAttribute(ownerOnlyDir))
+        }
+        Files.setPosixFilePermissions(dataDir.toPath(), ownerOnlyDir)
         val tmp = File(dataDir, "secrets.properties.tmp")
-        tmp.delete()
-        runCatching {
-            Files.createFile(tmp.toPath(), PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
-        }.onFailure { tmp.createNewFile() }
-        tmp.outputStream().use { props.store(it, "Lumen secrets (keyring unavailable). Keep private.") }
-        Files.move(
-            tmp.toPath(), fallbackFile.toPath(),
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-        )
+        Files.deleteIfExists(tmp.toPath())
+        Files.createFile(tmp.toPath(), PosixFilePermissions.asFileAttribute(ownerOnlyFile))
+        try {
+            tmp.outputStream().use { props.store(it, "Lumen secrets (keyring unavailable). Keep private.") }
+            Files.move(
+                tmp.toPath(), fallbackFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
+        } finally {
+            Files.deleteIfExists(tmp.toPath())
+        }
+        Files.setPosixFilePermissions(fallbackFile.toPath(), ownerOnlyFile)
+        check(Files.getPosixFilePermissions(fallbackFile.toPath()) == ownerOnlyFile) {
+            "could not restrict ${fallbackFile.path} to its owner"
+        }
     }
 
     companion object {

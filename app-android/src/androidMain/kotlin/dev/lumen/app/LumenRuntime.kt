@@ -82,6 +82,8 @@ class LumenRuntime private constructor(private val app: Context) {
     }
 
     fun openUrl(url: String) {
+        // Server-supplied links must not launch other apps via custom schemes.
+        if (!dev.lumen.app.common.isSafeWebLink(url)) return
         runCatching {
             app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }

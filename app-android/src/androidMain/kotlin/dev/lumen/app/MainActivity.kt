@@ -251,6 +251,7 @@ class MainActivity : ComponentActivity() {
                         onCancel = runtime.sync::cancelSignUp,
                         onSyncNow = runtime.sync::syncNow,
                         onForgetDevice = runtime.sync::forgetDevice,
+                        onApproveDevice = runtime.sync::approveDevice,
                         onOpenUrl = runtime::openUrl,
                     )
                 }

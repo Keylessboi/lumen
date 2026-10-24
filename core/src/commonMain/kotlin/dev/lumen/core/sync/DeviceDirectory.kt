@@ -42,17 +42,27 @@ data class PinnedDevice(
     val identityKey: String,
     val label: String,
     val firstSeenMs: Long,
+    /**
+     * The user confirmed this device on THIS device. Until then it is
+     * pending: nothing is encrypted to it, nothing it sends is applied, and
+     * no history is re-published for it.
+     */
+    val approved: Boolean = false,
 )
 
 /**
- * Trust-on-first-use pinning for the account's devices (`docs/e2ee.md` §8:
- * fingerprint verification is advisory in v1).
+ * Device pinning for the account, with explicit approval.
  *
- * The first key a device id presents is pinned. A LATER, DIFFERENT key for
- * the same id is refused and reported, never silently re-pinned: that is
- * exactly what a provider injecting a rogue key would look like, and the
- * user is the only one who can tell it apart from a reinstall. They resolve
- * it by forgetting the device, after which the next key is pinned again.
+ * The first key a device id presents is pinned, but only as PENDING. The
+ * device list lives on the provider, so a hostile or compromised provider
+ * can add a device of its own at any time; if new devices were trusted on
+ * sight it would receive every future record and — since devices re-publish
+ * their history for newcomers — the last 30 days as well. The user approves a
+ * new device on the Sync screen after comparing the code it shows for itself.
+ *
+ * A LATER, DIFFERENT key for the same id is refused and reported, never
+ * silently re-pinned. The user resolves it by forgetting the device, after
+ * which the next key is pinned (as pending) again.
  */
 @OptIn(ExperimentalEncodingApi::class)
 class DeviceTrust(
@@ -60,10 +70,11 @@ class DeviceTrust(
     private val localDeviceId: DeviceId,
 ) {
     data class Reconciled(
+        /** Approved devices: the only ones encrypted to and accepted from. */
         val trusted: List<PinnedDevice>,
         val warnings: List<String>,
-        /** Devices pinned by THIS reconcile — they have never been encrypted to. */
-        val newlyPinned: List<DeviceId> = emptyList(),
+        /** Seen but not approved on this device yet. */
+        val pending: List<PinnedDevice> = emptyList(),
     )
 
     fun pinned(): List<PinnedDevice> {
@@ -72,9 +83,21 @@ class DeviceTrust(
             .getOrDefault(emptyList())
     }
 
-    /** Raw public key for a pinned device, or null. */
+    /** Raw public key for an APPROVED device, or null (unknown or pending). */
     fun keyFor(deviceId: DeviceId): ByteArray? =
+        pinned().firstOrNull { it.deviceId == deviceId && it.approved }?.let { Base64.decode(it.identityKey) }
+
+    /** Raw key of a pinned device whether or not approved — for showing its code. */
+    fun pinnedKey(deviceId: DeviceId): ByteArray? =
         pinned().firstOrNull { it.deviceId == deviceId }?.let { Base64.decode(it.identityKey) }
+
+    /** The user confirmed [deviceId]. Returns false if it is not pinned. */
+    fun approve(deviceId: DeviceId, nowMs: Long): Boolean {
+        val pins = pinned()
+        if (pins.none { it.deviceId == deviceId }) return false
+        save(pins.map { if (it.deviceId == deviceId) it.copy(approved = true) else it }, nowMs)
+        return true
+    }
 
     /**
      * Fold the directory's current bundles into the pin set. Our own bundle
@@ -84,7 +107,6 @@ class DeviceTrust(
     fun reconcile(bundles: List<DeviceBundle>, nowMs: Long): Reconciled {
         val pins = pinned().associateBy { it.deviceId }.toMutableMap()
         val warnings = mutableListOf<String>()
-        val added = mutableListOf<DeviceId>()
         bundles.filter { it.deviceId != localDeviceId }.forEach { bundle ->
             val validKey = runCatching { Base64.decode(bundle.identityKey) }.getOrNull()?.takeIf { it.size == 32 }
             if (validKey == null) {
@@ -93,15 +115,13 @@ class DeviceTrust(
             }
             val existing = pins[bundle.deviceId]
             when {
-                existing == null -> {
-                    pins[bundle.deviceId] = PinnedDevice(
-                        deviceId = bundle.deviceId,
-                        identityKey = bundle.identityKey,
-                        label = bundle.label,
-                        firstSeenMs = nowMs,
-                    )
-                    added += bundle.deviceId
-                }
+                existing == null -> pins[bundle.deviceId] = PinnedDevice(
+                    deviceId = bundle.deviceId,
+                    identityKey = bundle.identityKey,
+                    label = bundle.label,
+                    firstSeenMs = nowMs,
+                    approved = false,
+                )
                 existing.identityKey != bundle.identityKey -> warnings +=
                     "key change: \"${existing.label}\" now presents a different key. " +
                     "Its records are ignored until you forget the device and let it re-pair."
@@ -109,7 +129,8 @@ class DeviceTrust(
             }
         }
         save(pins.values.toList(), nowMs)
-        return Reconciled(pins.values.sortedBy { it.firstSeenMs }, warnings, added)
+        val all = pins.values.sortedBy { it.firstSeenMs }
+        return Reconciled(all.filter { it.approved }, warnings, all.filterNot { it.approved })
     }
 
     fun forget(deviceId: DeviceId, nowMs: Long) {

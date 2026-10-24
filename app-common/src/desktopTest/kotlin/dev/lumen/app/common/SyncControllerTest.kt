@@ -1,5 +1,6 @@
 package dev.lumen.app.common
 
+import dev.lumen.core.crypto.EncryptedPayload
 import dev.lumen.core.crypto.InMemorySecretStore
 import dev.lumen.core.crypto.KeyPairRef
 import dev.lumen.core.crypto.Keychain
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import java.security.SecureRandom
 import kotlin.test.Test
@@ -80,6 +82,14 @@ class SyncControllerTest {
         )
     }
 
+    /** The user compares codes on both screens and approves each device on the other. */
+    private suspend fun pairUp(a: Install, b: Install) {
+        a.controller.approveDevice(b.id.value)
+        b.controller.approveDevice(a.id.value)
+        a.controller.syncOnce()
+        b.controller.syncOnce()
+    }
+
     @Test
     fun `time tracked on one device shows up on the other`() = runBlocking {
         val account = Account()
@@ -88,6 +98,8 @@ class SyncControllerTest {
         laptop.controller.signIn("example.org", "me", account.password)
         phone.controller.signIn("example.org", "me", account.password)
         assertIs<AccountUiState.Connected>(laptop.controller.state.value)
+        laptop.controller.syncOnce() // sees the phone
+        pairUp(laptop, phone)
 
         laptop.track(0, "org.gnome.Terminal", 30)
         laptop.track(1, "firefox", 15)
@@ -115,11 +127,31 @@ class SyncControllerTest {
 
         val phone = Install("phone", account)
         phone.controller.signIn("example.org", "me", account.password) // announces itself
-        laptop.controller.syncOnce() // sees the phone, re-publishes for it
+        laptop.controller.syncOnce() // sees the phone — pending, nothing sent to it
+        pairUp(laptop, phone) // approving re-publishes the laptop's history for it
         phone.controller.syncOnce()
 
         assertEquals(5, phone.store.eventsAfter(laptop.id, Long.MIN_VALUE).size)
         assertEquals(50L * 60_000, phone.store.bucketsForRange(laptop.id, 0, Long.MAX_VALUE).sumOf { it.activeMs })
+    }
+
+    @Test
+    fun `a device the server adds is shown as pending and receives nothing`() = runBlocking<Unit> {
+        val account = Account()
+        val laptop = Install("laptop", account)
+        laptop.controller.signIn("example.org", "me", account.password)
+        val rogueKey = X25519PrivateKeyParameters(SecureRandom()).generatePublicKey().encoded
+        account.devices["rogue"] = DeviceBundle(DeviceId("rogue"), dev.lumen.core.sync.DeviceTrust.encodeKey(rogueKey), "New phone", 0)
+
+        laptop.track(0, "secret.app", 10)
+        laptop.controller.syncOnce()
+
+        val wrappedFor = account.items.values.flatMap { record ->
+            Json.decodeFromString(EncryptedPayload.serializer(), record.payload.decodeToString()).wrappedKeys.keys
+        }.toSet()
+        assertEquals(setOf(laptop.id), wrappedFor, "no record may be readable by an unapproved device")
+        val connected = assertIs<AccountUiState.Connected>(laptop.controller.state.value)
+        assertTrue(connected.devices.single { it.id == "rogue" }.pending)
     }
 
     @Test

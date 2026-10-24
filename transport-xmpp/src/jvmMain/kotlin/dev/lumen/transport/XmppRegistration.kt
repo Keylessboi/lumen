@@ -187,7 +187,7 @@ internal fun parseRegistration(
         if (name == "username" || name == "password" || field.type == FormField.Type.hidden) return@forEach
         val media = field.getFormFieldChildElements(MediaElement.QNAME).filterIsInstance<MediaElement>().firstOrNull()
         if (media != null) {
-            captcha = captchaFrom(name, field.label ?: "Type the characters you see", media, bob, requestBoB)
+            captcha = captchaFrom(domain, name, field.label ?: "Type the characters you see", media, bob, requestBoB)
             return@forEach
         }
         extra += RegistrationField(
@@ -220,6 +220,7 @@ internal fun parseRegistration(
 }
 
 private fun captchaFrom(
+    domain: String,
     name: String,
     label: String,
     media: MediaElement,
@@ -234,15 +235,41 @@ private fun captchaFrom(
                 ?: requestBoB(cid)
             if (data != null) return RegistrationCaptcha(name, label, data.content, data.type, null)
         } else if (text.startsWith("https://") || text.startsWith("http://")) {
-            val bytes = fetchImage(text)
+            // The URL comes from the server. Fetch it only if it is safe to
+            // (see [safeCaptchaUrl]); otherwise the user gets a link to open.
+            val bytes = safeCaptchaUrl(text, domain)?.let(::fetchImage)
             return RegistrationCaptcha(name, label, bytes, uri.type, text)
         }
     }
     return RegistrationCaptcha(name, label, null, null, null)
 }
 
-private fun fetchImage(url: String): ByteArray? = runCatching {
-    val http = URI(url).toURL().openConnection() as HttpURLConnection
+/**
+ * A server-supplied CAPTCHA URL is fetched automatically only when it is
+ * HTTPS, on the registration domain or a subdomain of it, and resolves to
+ * public addresses only. Anything else — plain HTTP, another host, a
+ * loopback/private/link-local address — would let any server the user merely
+ * picks from a list make this device request URLs on its local network.
+ */
+internal fun safeCaptchaUrl(url: String, domain: String): URI? {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return null
+    if (uri.scheme?.lowercase() != "https" || uri.userInfo != null) return null
+    val host = uri.host?.lowercase()?.trimEnd('.') ?: return null
+    val zone = domain.lowercase().trimEnd('.')
+    if (host != zone && !host.endsWith(".$zone")) return null
+    val addresses = runCatching { java.net.InetAddress.getAllByName(host).toList() }.getOrNull() ?: return null
+    if (addresses.isEmpty() || addresses.any(::isNonPublic)) return null
+    return uri
+}
+
+private fun isNonPublic(a: java.net.InetAddress): Boolean =
+    a.isLoopbackAddress || a.isAnyLocalAddress || a.isLinkLocalAddress || a.isSiteLocalAddress ||
+        a.isMulticastAddress || (a is java.net.Inet6Address && (a.address[0].toInt() and 0xfe) == 0xfc)
+
+private fun fetchImage(url: URI): ByteArray? = runCatching {
+    val http = url.toURL().openConnection() as HttpURLConnection
+    // A redirect could point anywhere, including the local network.
+    http.instanceFollowRedirects = false
     http.connectTimeout = 10_000
     http.readTimeout = 10_000
     try {

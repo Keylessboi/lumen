@@ -54,8 +54,9 @@ data class AccountConfig(val host: String, val port: Int, val jid: String)
  *
  *  1. Publish this device's bundle (id, X25519 identity key, label) to the
  *     account's device list, and read everyone else's.
- *  2. Pin new devices (TOFU, [DeviceTrust]); refuse changed keys. When a
- *     device is new, re-publish this device's retained history for it.
+ *  2. Pin new devices as PENDING ([DeviceTrust]); refuse changed keys.
+ *     Only devices the user approved are encrypted to or accepted from;
+ *     approving one re-publishes this device's retained history for it.
  *  3. Run [SyncEngine] over [EncryptedTransport] with [Omemo2E2EE]: every
  *     record is encrypted once and its key wrapped for each pinned device.
  *  4. Derive buckets and rollups for events pulled from other devices.
@@ -227,6 +228,21 @@ class SyncController(
         }
     }
 
+    /**
+     * The user compared codes and approved [id]. Its key is now used, its
+     * records are accepted, and this device re-publishes its retained
+     * history (events are kept ~30 days) so the new device can read it —
+     * items are keyed by seq range, so this overwrites rather than duplicates.
+     */
+    fun approveDevice(id: String) {
+        scope.launch {
+            if (!trust.approve(DeviceId(id), clock())) return@launch
+            store.setAckedSeq(deviceId, -1)
+            refreshConnected()
+            syncOnce()
+        }
+    }
+
     fun forgetDevice(id: String) {
         scope.launch {
             trust.forget(DeviceId(id), clock())
@@ -285,11 +301,6 @@ class SyncController(
             val recipients = reconciled.trusted.map { it.deviceId }.toSet()
 
             initialiseOutbox()
-            // A device we have never encrypted to cannot read anything already
-            // on the server. Re-publish this device's retained history (events
-            // are kept ~30 days) encrypted for the new set: items are keyed by
-            // seq range, so this overwrites rather than duplicates.
-            if (reconciled.newlyPinned.isNotEmpty()) store.setAckedSeq(deviceId, -1)
             val e2ee = Omemo2E2EE(deviceId, sk, pk, publicKeyResolver = { id ->
                 trust.keyFor(id)?.let { X25519PublicKeyParameters(it) }
             })
@@ -298,7 +309,12 @@ class SyncController(
             deriveRemote(report.remoteEvents)
 
             putSetting(KEY_LAST_SYNC, clock().toString())
-            putSetting(KEY_WARNINGS, (reconciled.warnings + report.integrityWarnings).distinct().take(MAX_WARNINGS).joinToString("\n"))
+            // A pending device's records are held back until it is approved —
+            // that is shown as an Approve prompt, not as an error.
+            val pendingIds = reconciled.pending.map { it.deviceId.value }
+            val shown = (reconciled.warnings + report.integrityWarnings)
+                .filterNot { w -> pendingIds.any { w.contains(it) } }
+            putSetting(KEY_WARNINGS, shown.distinct().take(MAX_WARNINGS).joinToString("\n"))
             setSyncing(false, null)
             if (report.remoteEvents.isNotEmpty()) onRemoteData()
             report
@@ -350,9 +366,14 @@ class SyncController(
         val ownKey = runCatching { keychain.deviceKeyPair().publicKey }.getOrNull()
         val devices = buildList {
             ownKey?.let { add(DeviceRow(deviceId.value, deviceLabel, Omemo2E2EE.fingerprintOf(it), thisDevice = true)) }
-            trust.pinned().forEach { pin ->
-                val key = trust.keyFor(pin.deviceId) ?: return@forEach
-                add(DeviceRow(pin.deviceId.value, pin.label, Omemo2E2EE.fingerprintOf(key), thisDevice = false))
+            trust.pinned().sortedBy { it.approved }.forEach { pin ->
+                val key = trust.pinnedKey(pin.deviceId) ?: return@forEach
+                add(
+                    DeviceRow(
+                        pin.deviceId.value, pin.label, Omemo2E2EE.fingerprintOf(key),
+                        thisDevice = false, pending = !pin.approved,
+                    ),
+                )
             }
         }
         return AccountUiState.Connected(
