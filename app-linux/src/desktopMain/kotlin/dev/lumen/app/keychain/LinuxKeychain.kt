@@ -3,7 +3,6 @@ package dev.lumen.app.keychain
 import dev.lumen.core.crypto.KeyPairRef
 import dev.lumen.core.crypto.Keychain
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
-import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -31,63 +30,48 @@ import java.util.Base64
  * use and kept forever (a device identity must survive reinstalls of
  * the app but not of the OS — which is exactly what a keyring does).
  */
-class LinuxKeychain : Keychain {
+class LinuxKeychain(
+    private val secrets: LinuxSecretStore = LinuxSecretStore(),
+) : Keychain {
 
-    override fun deviceKeyPair(): KeyPairRef {
-        lookup()?.let { return it }
-        return generateAndStore()
-    }
+    /**
+     * The identity is generated ONLY when the store positively says it has
+     * none. Any other failure throws: a new keypair under the same device id
+     * is a "key change" every other device refuses, and this device could no
+     * longer read its own history. Better one failed sync pass than that.
+     */
+    @Synchronized
+    override fun deviceKeyPair(): KeyPairRef =
+        when (val found = secrets.lookup(ACCOUNT)) {
+            is LinuxSecretStore.Lookup.Found -> parse(found.value)
+                ?: throw IllegalStateException("the stored device key is malformed; refusing to replace it")
+            LinuxSecretStore.Lookup.Absent -> generateAndStore()
+            is LinuxSecretStore.Lookup.Unreadable -> throw IllegalStateException("device key unavailable: ${found.reason}")
+        }
 
-    private fun lookup(): KeyPairRef? {
-        val proc = runCatching {
-            ProcessBuilder("secret-tool", "lookup", "service", SERVICE, "account", ACCOUNT)
-                .redirectErrorStream(true)
-                .start()
-        }.getOrNull() ?: return null
-        // waitFor FIRST: readText() blocks until EOF, so a hung subprocess
-        // would never hit the timeout if read before the wait.
-        if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
-            proc.destroyForcibly()
-            return null
-        }
-        val out = proc.inputStream.bufferedReader().readText().trim()
-        if (proc.exitValue() != 0 || out.isBlank()) return null
-        val (pubB64, privB64) = out.split(":").let {
-            if (it.size != 2) return null else it[0] to it[1]
-        }
+    private fun parse(stored: String): KeyPairRef? {
+        val parts = stored.trim().split(":")
+        if (parts.size != 2) return null
         return runCatching {
             KeyPairRef(
-                publicKey = Base64.getDecoder().decode(pubB64),
-                privateKeyHandle = Base64.getDecoder().decode(privB64),
-            )
+                publicKey = Base64.getDecoder().decode(parts[0]),
+                privateKeyHandle = Base64.getDecoder().decode(parts[1]),
+            ).takeIf { it.publicKey.size == 32 && it.privateKeyHandle.size == 32 }
         }.getOrNull()
     }
 
     private fun generateAndStore(): KeyPairRef {
         val sk = X25519PrivateKeyParameters(SecureRandom())
-        val pk = sk.generatePublicKey()
-        val pub = pk.encoded
+        val pub = sk.generatePublicKey().encoded
         val priv = sk.encoded
-        val value = "${Base64.getEncoder().encodeToString(pub)}:${Base64.getEncoder().encodeToString(priv)}"
-
-        // `secret-tool store` reads the secret from stdin — passing it via
-        // argv would put it in `ps` output, readable by every same-user
-        // process (the same reasoning as MacosKeychain's -w stdin note).
-        // Attributes are name-value pairs: "service" -> SERVICE, "account"
-        // -> ACCOUNT, matching the lookup command.
-        val proc = ProcessBuilder(
-            "secret-tool", "store", "--label=dev.lumen.linux device key",
-            "service", SERVICE, "account", ACCOUNT,
-        ).start()
-        proc.outputStream.use { it.write(value.toByteArray()) }
-        if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
-            proc.destroyForcibly()
-        }
+        // LinuxSecretStore verifies the keyring write and falls back to a
+        // private file — never "stored" into nothing, which minted a new
+        // device identity on every launch wherever secret-tool was missing.
+        secrets.put(ACCOUNT, "${Base64.getEncoder().encodeToString(pub)}:${Base64.getEncoder().encodeToString(priv)}")
         return KeyPairRef(publicKey = pub, privateKeyHandle = priv)
     }
 
     companion object {
-        private const val SERVICE = "dev.lumen.linux"
         private const val ACCOUNT = "device-key"
     }
 }

@@ -5,8 +5,11 @@
 #   "1h 23m · kitty"
 #
 # Data sources:
-#   - today's total: SQLite rollups for the current UTC day, excluding the
-#     idle key (AppKey ""), summed. Same numbers the Today screen shows.
+#   - today's total: this device's minute buckets since LOCAL midnight,
+#     excluding the idle key (AppKey ""). Same numbers the Today screen shows.
+#     (It summed the UTC day's rollups, which reset the bar at 8 pm for a
+#     UTC-4 user — the bug the Today screen fixed in #29 — and, once sync
+#     landed, would also have counted other devices.)
 #   - live app: `hyprctl activewindow` class, matching what the Hyprland
 #     collector records.
 #
@@ -39,10 +42,13 @@ format_ms() {
     fi
 }
 
-# Today's rollups, excluding the idle key (blank app_key).
+# Local midnight as epoch ms: date('now','localtime') is today's local date;
+# strftime('%s', <that>, 'utc') converts that local midnight to UTC seconds.
 total_ms=$(sqlite3 "$DB" \
-    "SELECT COALESCE(SUM(total_ms), 0) FROM rollups
-     WHERE day_utc = date('now') AND app_key != '';" 2>/dev/null || echo 0)
+    "SELECT COALESCE(SUM(active_ms), 0) FROM buckets
+     WHERE app_key != ''
+       AND bucket_ts >= CAST(strftime('%s', date('now', 'localtime'), 'utc') AS INTEGER) * 1000
+       AND device_id = (SELECT CAST(value AS TEXT) FROM settings WHERE key = 'device_id');" 2>/dev/null || echo 0)
 
 # Live app from the compositor, class only (never a window title).
 live_app=$(hyprctl activewindow -j 2>/dev/null \

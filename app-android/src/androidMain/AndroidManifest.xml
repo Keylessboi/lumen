@@ -17,6 +17,12 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Sync (XMPP) and scrobbling (Last.fm, Libre.fm, ListenBrainz) are
+         network features. Without this every connection failed with a
+         SecurityException, so Android could never sync. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- Android 11+ package visibility: without a <queries> declaration the
          PackageManager only returns Lumen itself, system packages, and
          packages it has intent filters for. Every other installed app throws
@@ -32,6 +38,7 @@
     </queries>
 
     <application
+        android:name=".LumenApplication"
         android:allowBackup="false"
         android:label="Lumen"
         android:supportsRtl="true"
@@ -45,6 +52,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Scrobbling: the permission Android gates media sessions behind.
+             Only media controls are read; notifications are ignored. -->
+        <service
+            android:name=".media.MediaListenerService"
+            android:exported="false"
+            android:label="Lumen scrobbling"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

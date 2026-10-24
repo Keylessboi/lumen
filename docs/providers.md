@@ -164,3 +164,19 @@ Step 1 is Agent B's and can land as soon as zone ownership settles. Steps 3–4 
 - [xmpp-providers repository](https://invent.kde.org/melvo/xmpp-providers) — machine-readable list, schema
 - [XEP-0077: In-Band Registration](https://xmpp.org/extensions/xep-0077.html)
 - [XEP-0445: Pre-Authenticated In-Band Registration](https://xmpp.org/extensions/xep-0445.html) — worth evaluating post-v1 for invite-based onboarding
+
+---
+
+## 9. Snapshot 2026-10-23 and CAPTCHA sign-up
+
+The app now shows XEP-0158 CAPTCHAs during sign-up (image via Bits of Binary or URL, ejabberd's fallback link included), the way monocles chat does. The "captcha-free" hard requirement in §4 is therefore relaxed to an ordering rule: CAPTCHA-free servers are listed first, CAPTCHA servers after them, and every server keeps "pick another server" and local-only as peers.
+
+Pinned list (`Providers.kt`, from `providers-A.json` fetched 2026-10-23, Category A, top C2S rating, no email requirement): yax.im, jabber.de, xmpp.party, jabber.vg, chat.between-us.online, lain.rocks (no CAPTCHA); hookipa.net, jabjab.de, magicbroccoli.de, chalec.org, openim.nl, 07f.de, chatterboxtown.us, og.im, projectsegfau.lt (CAPTCHA).
+
+Removed: **jabber.fr** — no longer in Category A upstream.
+
+MAM retention (§5) no longer filters: sync uses PEP pubsub, so the node's `max_items`, not the MAM window, bounds how long a device can be offline. The transport walks `max_items` down from 1000 until the server accepts one.
+
+Verified live on 2026-10-23 without creating any account: every server above accepted a TLS-required connection with the certificate checked against the domain, and returned its registration form; all nine CAPTCHA servers delivered a PNG that parses.
+
+Still owed (§8): the human review of operators, legal notices and privacy policies for the newly added servers.

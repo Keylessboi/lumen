@@ -197,7 +197,7 @@ class JvmLumenStore private constructor(
      * the day stops growing with no error. Seeding the tracker's nextSeq
      * from here is the single point where the monotonic counter is owned.
      */
-    fun lastEventSeq(deviceId: DeviceId): Long =
+    override fun lastEventSeq(deviceId: DeviceId): Long =
         queries.selectEventsAfter(deviceId.value, Long.MIN_VALUE)
             .executeAsList()
             .lastOrNull()

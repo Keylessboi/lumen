@@ -7,6 +7,8 @@ agp = "8.9.2"
 compose-multiplatform = "1.8.2"
 androidx-activity = "1.10.1"
 androidx-lifecycle = "2.9.0"
+# Background import + sync on Android (periodic work survives process death).
+androidx-work = "2.10.0"
 sqldelight = "2.0.2"
 sqlite-jdbc = "3.45.2.0"
 kotlinx-coroutines = "1.10.1"
@@ -48,11 +50,15 @@ smack-extensions = { module = "org.igniterealtime.smack:smack-extensions", versi
 # parser (xpp3 or stax) Smack fails at init with "No XmlPullParserFactory
 # registered with Service Provider Interface".
 smack-xmlparser-stax = { module = "org.igniterealtime.smack:smack-xmlparser-stax", version.ref = "smack" }
+# Android's XML backend: drives the platform's built-in XmlPullParser.
+smack-xmlparser-xpp3 = { module = "org.igniterealtime.smack:smack-xmlparser-xpp3", version.ref = "smack" }
 # MiniDNS resolver: without it DNSUtil.getDNSResolver() is null and TCP
 # connect fails with an NPE before any packet is sent.
 smack-resolver-minidns = { module = "org.igniterealtime.smack:smack-resolver-minidns", version.ref = "smack" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

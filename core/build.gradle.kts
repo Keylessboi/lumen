@@ -39,7 +39,17 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.core)
             }
         }
+        // Code shared by BOTH JVM targets (desktop + Android): the E2EE
+        // implementations. They were desktop-only, so the Android app had no
+        // way to encrypt or decrypt a sync record at all.
+        val jvmMain by creating {
+            dependsOn(commonMain)
+            dependencies {
+                implementation(libs.bouncycastle)
+            }
+        }
         val desktopMain by getting {
+            dependsOn(jvmMain)
             dependencies {
                 implementation(libs.sqldelight.jvm.driver)
                 // Argon2id for the M5 export (docs/e2ee.md §7).
@@ -47,6 +57,7 @@ kotlin {
             }
         }
         val androidMain by getting {
+            dependsOn(jvmMain)
             dependencies {
                 implementation(libs.sqldelight.android.driver)
                 // Same Argon2id implementation as desktop, so an export

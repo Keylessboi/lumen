@@ -20,6 +20,10 @@ kotlin {
                 implementation(project(":core"))
                 implementation(project(":ui"))
                 implementation(project(":transport-xmpp"))
+                implementation(project(":scrobble"))
+                implementation(project(":app-common"))
+                implementation(libs.androidx.work.runtime)
+                implementation(libs.androidx.lifecycle.runtime.compose)
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(compose.material3)
@@ -74,6 +78,10 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
+            // R8 with no rules strips what Smack, MiniDNS and Bouncy Castle
+            // load by reflection or ServiceLoader — the release APK would
+            // fail on first connection while debug builds worked.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             manifestPlaceholders["enableBackup"] = "false"
         }
         getByName("debug") {
