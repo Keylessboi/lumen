@@ -155,6 +155,24 @@ class SyncControllerTest {
     }
 
     @Test
+    fun `a pending device id cannot hide other warnings`() = runBlocking<Unit> {
+        val account = Account()
+        val laptop = Install("laptop", account)
+        laptop.controller.signIn("example.org", "me", account.password)
+        val key = { X25519PrivateKeyParameters(SecureRandom()).generatePublicKey().encoded }
+        // A one-letter id that appears in nearly every message.
+        account.devices["e"] = DeviceBundle(DeviceId("e"), dev.lumen.core.sync.DeviceTrust.encodeKey(key()), "x", 0)
+        account.devices["phone"] = DeviceBundle(DeviceId("phone"), dev.lumen.core.sync.DeviceTrust.encodeKey(key()), "Phone", 0)
+        laptop.controller.syncOnce()
+        // The phone's key changes: that warning must survive.
+        account.devices["phone"] = DeviceBundle(DeviceId("phone"), dev.lumen.core.sync.DeviceTrust.encodeKey(key()), "Phone", 0)
+        laptop.controller.syncOnce()
+
+        val connected = assertIs<AccountUiState.Connected>(laptop.controller.state.value)
+        assertTrue(connected.warnings.any { it.startsWith("key change") }, "${connected.warnings}")
+    }
+
+    @Test
     fun `a fresh install is not configured and never syncs`() = runBlocking<Unit> {
         val install = Install("fresh", Account())
         assertEquals(false, install.controller.isConfigured())

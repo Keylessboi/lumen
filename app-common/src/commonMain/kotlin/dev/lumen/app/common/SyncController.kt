@@ -310,10 +310,14 @@ class SyncController(
 
             putSetting(KEY_LAST_SYNC, clock().toString())
             // A pending device's records are held back until it is approved —
-            // that is shown as an Approve prompt, not as an error.
+            // that is shown as an Approve prompt, not as an error. Only that
+            // exact "held back" message, for exactly that device id, is
+            // dropped: ids come from the server, and a substring match let a
+            // device named e.g. "e" hide every warning, key changes included.
             val pendingIds = reconciled.pending.map { it.deviceId.value }
-            val shown = (reconciled.warnings + report.integrityWarnings)
-                .filterNot { w -> pendingIds.any { w.contains(it) } }
+            val shown = reconciled.warnings + report.integrityWarnings.filterNot { w ->
+                pendingIds.any { id -> w.startsWith("undecryptable: $id seq ") && w.endsWith("no trusted key for device $id") }
+            }
             putSetting(KEY_WARNINGS, shown.distinct().take(MAX_WARNINGS).joinToString("\n"))
             setSyncing(false, null)
             if (report.remoteEvents.isNotEmpty()) onRemoteData()
